@@ -208,7 +208,7 @@ updates, and refreshes the hub view after starting the server."
   (interactive)
   (when-let* ((server (tabulated-list-get-entry))
               (name (elt server 0))
-              (server-arg (find name mcp-hub-servers :key #'car :test #'equal)))
+              (server-arg (cl-find name mcp-hub-servers :key #'car :test #'equal)))
     (mcp-hub--start-server server-arg)
     (mcp-hub-update)))
 
