@@ -184,95 +184,76 @@ Available levels:
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (let* ((conn (process-get proc 'jsonrpc-connection))
-             (expected-bytes (jsonrpc--expected-bytes conn)))
-        ;; Insert the text, advancing the process marker.
-        ;;
-        ;; (save-excursion
-        ;;   (goto-char (process-mark proc))
-        ;;   (let ((inhibit-read-only t)) (insert string))
-        ;;   (set-marker (process-mark proc) (point)))
-        ;; Loop (more than one message might have arrived)
-        ;;
-        (unwind-protect
-            (let ((message nil)
-                  (done nil))
-              (let ((messages (split-string string "\n")))
-                (dolist (msg messages)
-                  (pcase (mcp--connection-type conn)
-                    ('sse
-                     (when (not (string-empty-p msg))
-                       (cond
-                        ;; Handle endpoint events
-                        ((string-prefix-p "event: endpoint" msg)
-                         (when-let* ((data (mcp--get-data messages)))
-                           (setf (mcp--endpoint conn) data)))
+             (queue (or (process-get proc 'jsonrpc-mqueue) nil))
+             (buf (or (process-get proc 'jsonrpc-pending) ""))
+             (data (concat buf string))
+             (messages '())
+             (type (mcp--connection-type conn)))
 
-                        ;; Handle message events
-                        ((string-prefix-p "data: " msg)
-                         (let ((data (substring msg (length "data: "))))
-                           (setq message
-                                 (condition-case-unless-debug oops
-                                     (json-parse-string data
-                                                        :object-type 'plist
-                                                        :null-object nil
-                                                        :false-object :json-false)
-                                   (error
-                                    (jsonrpc--warn "Invalid JSON: %s %s"
-                                                   (cdr oops) data)
-                                    nil)))
-                           (when message
-                             (setq message
-                                   (plist-put message :jsonrpc-json data))
-                             ;; Put new messages at the front of the queue
-                             (push message
-                                   (process-get proc 'jsonrpc-mqueue))))))))
-                    ('stdio
-                     (when (not (string-empty-p msg))
-                       (setq message
-                             (condition-case-unless-debug oops
-                                 (json-parse-string msg
-                                                    :object-type 'plist
-                                                    :null-object nil
-                                                    :false-object :json-false)
-                               (error
-                                (jsonrpc--warn "Invalid JSON: %s %s"
-                                               (cdr oops) (buffer-string))
-                                nil)))
-                       (when message
-                         (setq message
-                               (plist-put message :jsonrpc-json
-                                          (buffer-string)))
-                         ;; Put new messages at the front of the queue,
-                         ;; this is correct as the order is reversed
-                         ;; before putting the timers on `timer-list'.
-                         (push message
-                               (process-get proc 'jsonrpc-mqueue)))))))
-                (let ((inhibit-read-only t))
-                  (delete-region (point-min) (point)))))
-          ;; Saved parsing state for next visit to this filter, which
-          ;; may well be a recursive one stemming from the tail call
-          ;; to `jsonrpc-connection-receive' below (bug#60088).
-          ;;
-          (setf (jsonrpc--expected-bytes conn) expected-bytes)
-          ;; Now, time to notify user code of one or more messages in
-          ;; order.  Very often `jsonrpc-connection-receive' will exit
-          ;; non-locally (typically the reply to a request), so do
-          ;; this all this processing in top-level loops timer.
-          (cl-loop
-           ;; `timer-activate' orders timers by time, which is an
-           ;; very expensive operation when jsonrpc-mqueue is large,
-           ;; therefore the time object is reused for each timer
-           ;; created.
-           with time = (current-time)
-           for msg = (pop (process-get proc 'jsonrpc-mqueue)) while msg
-           do (let ((timer (timer-create)))
-                (timer-set-time timer time)
-                (timer-set-function timer
-                                    (lambda (conn msg)
-                                      (with-temp-buffer
-                                        (jsonrpc-connection-receive conn msg)))
-                                    (list conn msg))
-                (timer-activate timer))))))))
+        ;; Define extraction function
+        (cl-labels
+            ((extract-messages (data)
+               (let ((msgs '())
+                     (rest "")
+                     (lines (split-string data "\n")))
+                 (dolist (line lines)
+                   (cond
+                    ;; SSE format
+                    ((and (eq type 'sse) (string-prefix-p "data: " line))
+                     (let ((json-str (string-trim (substring line 6))))
+                       (when (not (string-empty-p json-str))
+                         (push (cons t json-str) msgs))))
+                    ;; STDIO format
+                    ((eq type 'stdio)
+                     (let ((json-str (string-trim line)))
+                       (unless (string-empty-p json-str)
+                         (push (cons t json-str) msgs)))))
+                   ;; NOTE: other formats are not supported
+                   )
+                 (cons (nreverse msgs) rest)))) ;; ← return as cons pair
+
+          ;; Actually extract: messages + remaining buffer
+          (let* ((parsed (extract-messages data))
+                 (parsed-messages (car parsed))
+                 (rest (cdr parsed)))
+
+            ;; Save remaining data to pending for next processing
+            (process-put proc 'jsonrpc-pending rest)
+
+            ;; Add messages to MQUEUE
+            (dolist (msg parsed-messages)
+              (pcase-let ((`(,complete . ,json-str) msg))
+                (when complete
+                  (let ((json nil))
+                    (condition-case-unless-debug err
+                        (setq json (json-parse-string json-str
+                                                      :object-type 'plist
+                                                      :null-object nil
+                                                      :false-object :json-false))
+                      (error
+                       (jsonrpc--warn "Invalid JSON: %s %s"
+                                      (cdr err) json-str)))
+                    (when json
+                      (setq json (plist-put json :jsonrpc-json json-str))
+                      (push json queue))))))
+
+            ;; Save updated queue
+            (process-put proc 'jsonrpc-mqueue queue)
+
+            ;; Dispatch messages in timer
+            (cl-loop with time = (current-time)
+                     for msg = (pop queue) while msg
+                     do (let ((timer (timer-create)))
+                          (timer-set-time timer time)
+                          (timer-set-function timer
+                                              (lambda (conn msg)
+                                                (with-temp-buffer
+                                                  (jsonrpc-connection-receive conn msg)))
+                                              (list conn msg))
+                          (timer-activate timer)))
+
+            ;; Save final queue (might have been consumed by timer pop)
+            (process-put proc 'jsonrpc-mqueue queue)))))))
 
 (defun mcp--sse-connect (process host port path)
   (process-send-string process
