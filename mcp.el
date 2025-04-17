@@ -223,7 +223,7 @@ LINES is a list of strings from an SSE event stream."
                         ;; Handle endpoint events
                         ((string-prefix-p "event: endpoint" msg)
                          (when-let* ((data (mcp--get-data messages)))
-			    (setf (mcp--endpoint conn) (string-trim data))))
+			   (setf (mcp--endpoint conn) (string-trim data))))
 
                         ;; Handle message events
                         ((string-prefix-p "data: " msg)
@@ -292,10 +292,11 @@ LINES is a list of strings from an SSE event stream."
                                     (list conn msg))
                 (timer-activate timer))))))))
 
-(defun mcp--sse-connect (process host port path)
+(defun mcp--sse-connect (process host port path tls)
   "Establish SSE connection to server.
 PROCESS is the network process object. HOST and PORT specify the
 server address. PATH is the endpoint path for SSE connection.
+TLS is non-nil if the connection should use HTTPS.
 Sends HTTP GET request with SSE headers to initiate the event
 stream connection. Used internally by MCP for SSE-based JSON-RPC
 communication."
@@ -303,9 +304,15 @@ communication."
                        (concat
                         (format "GET %s HTTP/1.1\r\n"
                                 path)
-                        (format "Host: %s:%s\r\n"
-                                host
-                                port)
+                        (format "Host: %s\r\n"
+                                (if (or (and (numberp port)
+                                             (or (and (not tls) (= port 80))
+                                                 (and tls (= port 443))))
+                                        (and (stringp port)
+                                             (or (and (not tls) (string= port "80"))
+                                                 (and tls (string= port "443")))))
+                                    host
+                                  (format "%s:%s" host port)))
                         "Accept: text/event-stream\r\n"
                         "Cache-Control: no-cache\r\n"
                         "Connection: keep-alive\r\n\r\n")))
@@ -343,8 +350,8 @@ notification data."
   (pcase method
     ('notifications/message
      (cond ((or (plist-member (mcp--capabilities connection) :logging)
-               (and (plist-member params :level)
-                  (plist-member params :data)))
+                (and (plist-member params :level)
+                     (plist-member params :data)))
             (cl-destructuring-bind (&key level data &allow-other-keys) params
               (let ((logger (plist-get params :logger)))
                 (message "[mcp][%s][%s]%s: %s"
@@ -377,7 +384,7 @@ Returns nil if URL is invalid or not HTTP/HTTPS."
               (host (url-host url))
               (filename (url-filename url)))
     (when (or (string= type "http")
-             (string= type "https"))
+              (string= type "https"))
       (let ((port (url-port url))
             (tls (string= "https" type)))
         (list :tls tls
@@ -391,8 +398,8 @@ Returns nil if URL is invalid or not HTTP/HTTPS."
 
 ;;;###autoload
 (cl-defun mcp-connect-server (name &key command args url env initial-callback
-                                  tools-callback prompts-callback
-                                  resources-callback error-callback)
+                                   tools-callback prompts-callback
+                                   resources-callback error-callback)
   "Connect to an MCP server with NAME, COMMAND, and ARGS or URL.
 
 NAME is a string representing the name of the server.
@@ -462,7 +469,8 @@ in the `mcp-server-connections` hash table for future reference."
         (mcp--sse-connect process
                           (plist-get server-config :host)
                           (plist-get server-config :port)
-                          (plist-get server-config :path)))
+                          (plist-get server-config :path)
+                          (plist-get server-config :tls)))
       (let ((connection (apply #'make-instance
                                `(,(pcase connection-type
                                     ('sse
@@ -496,8 +504,8 @@ in the `mcp-server-connections` hash table for future reference."
                #'(lambda ()
                    (cl-incf initial-use-time)
                    (when (or (equal connection-type 'stdio)
-                            (and (equal connection-type 'sse)
-                               (mcp--endpoint connection)))
+                             (and (equal connection-type 'sse)
+                                  (mcp--endpoint connection)))
                      (cancel-timer initial-timer)
                      (mcp-async-initialize-message
                       connection
