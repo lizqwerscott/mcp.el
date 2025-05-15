@@ -121,7 +121,8 @@ Optional argument SERVERS is a list of server names (strings) to filter which
 servers should be started. When nil, all configured servers are considered."
   (interactive)
   (let* ((servers-to-start (cl-remove-if (lambda (server)
-                                           (or (not (cl-find (car server) servers :test #'string=))
+                                           (or (and servers
+                                                    (not (cl-find (car server) servers :test #'string=)))
                                                (gethash (car server) mcp-server-connections)))
                                          mcp-hub-servers))
          (total (length servers-to-start))
