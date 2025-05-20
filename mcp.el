@@ -23,7 +23,22 @@
 
 ;;; Commentary:
 
+;; mcp is an Emacs client for interfacing with [[https://modelcontextprotocol.io/introduction][MCP]], supporting connections to MCP
+;; servers.
 ;;
+;; Features:
+;;
+;; - Structured communication with MCP servers
+;; - Support for filesystem and generic MCP servers
+;; - Extensible tool and prompt system
+;; - Asynchronous and synchronous operations
+;; - Resource management capabilities
+;; - Intuitive interface for managing server lifecycle (start/stop/restart)
+;; - Integration with popular Emacs packages (e.g., gptel, llm)
+;;
+;; Usage:
+;; - config `mcp-hub-servers'
+;; - call `mcp-hub' to start mcp servers
 
 ;;; Code:
 
@@ -31,7 +46,7 @@
 (require 'cl-lib)
 (require 'url)
 
-(defconst *MCP-VERSION* (list "2025-03-26" "2024-11-05")
+(defconst mcp--support-versions (list "2025-03-26" "2024-11-05")
   "MCP support version.")
 
 (defcustom mcp-server-start-time 60
@@ -163,7 +178,7 @@ Available levels:
   "Return non-nil if JSONRPC connection CONN is running."
   (setf (mcp--running conn) nil))
 
-(defun parse-http-header (headers)
+(defun mcp--parse-http-header (headers)
   "Parse HTTP response headers into a plist.
 
 HEADERS is a string containing the raw HTTP response headers.
@@ -171,7 +186,7 @@ Returns a plist where each header field is a keyword (e.g. :content-type)
 with its corresponding value.
 
 Example:
-  (parse-http-header \"Content-Type: text/html\\r\\nServer: nginx\\r\\n\")
+  (mcp--parse-http-header \"Content-Type: text/html\\r\\nServer: nginx\\r\\n\")
   => (:content-type \"text/html\" :server \"nginx\")"
   (when-let* ((header-lines (split-string headers "\n"))
               (status-line (car header-lines))
@@ -258,7 +273,7 @@ The message is sent differently based on connection type:
                              (when (search-forward "\n\n" nil t)
                                (let* ((headers (buffer-substring (point-min) (point)))
                                       (body (buffer-substring (point) (point-max)))
-                                      (headers-plist (parse-http-header headers))
+                                      (headers-plist (mcp--parse-http-header headers))
                                       (session-id (plist-get headers-plist :mcp-session-id))
                                       (response-code (plist-get headers-plist :response-code)))
                                  (when (string= "4"
@@ -350,7 +365,7 @@ The message is sent differently based on connection type:
               (pcase type
                 ('http
                  (if (string-prefix-p "HTTP" data-block)
-                     (if-let* ((headers (parse-http-header data-block))
+                     (if-let* ((headers (mcp--parse-http-header data-block))
                                (response-code (plist-get headers :response-code))
                                (content-type (plist-get headers :content-type)))
                          (when (or (not (string= response-code "200"))
@@ -612,7 +627,7 @@ mcp server before sending."
    connection
    check-sse
    #'(lambda (protocolVersion serverInfo capabilities)
-       (if (cl-find protocolVersion *MCP-VERSION* :test #'string=)
+       (if (cl-find protocolVersion mcp--support-versions :test #'string=)
            (progn
              (message "[mcp] Connected! Server `MCP (%s)' now managing." (jsonrpc-name connection))
              (setf (mcp--capabilities connection) capabilities
@@ -645,7 +660,7 @@ mcp server before sending."
            (message "[mcp] Error %s server protocolVersion(%s) not support, client Version: %s."
                     (jsonrpc-name connection)
                     protocolVersion
-                    *MCP-VERSION*)
+                    mcp--support-versions)
            (mcp-stop-server (jsonrpc-name connection)))))
    #'(lambda (code message)
        (mcp-stop-server (jsonrpc-name connection))
@@ -957,7 +972,7 @@ This function sends an `initialize' request to the server
 with the client's capabilities and version information."
   (jsonrpc-async-request connection
                          :initialize
-                         (list :protocolVersion (car *MCP-VERSION*)
+                         (list :protocolVersion (car mcp--support-versions)
                                :capabilities '(:roots (:listChanged t))
                                :clientInfo '(:name "mcp-emacs" :version "0.1.0"))
                          :success-fn
