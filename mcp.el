@@ -599,10 +599,18 @@ Returns nil if URL is invalid or not HTTP/HTTPS."
                         80))
               :path filename)))))
 
-(defun mcp--send-initial-message (connection)
-  "Send initialization message to MCP server CONNECTION."
+(defun mcp--send-initial-message (connection &optional check-sse)
+  "Send initialization message to MCP server CONNECTION.
+
+This function sends the initial handshake message to establish communication
+with the MCP server. It is called internally during server connection setup.
+
+CONNECTION is the MCP connection object representing the server connection.
+CHECK-SSE is an optional boolean flag indicating whether to verify is SSE
+mcp server before sending."
   (mcp-async-initialize-message
    connection
+   check-sse
    #'(lambda (protocolVersion serverInfo capabilities)
        (if (cl-find protocolVersion *MCP-VERSION* :test #'string=)
            (progn
@@ -753,7 +761,7 @@ in the `mcp-server-connections` hash table for future reference."
                                    (if (jsonrpc-running-p connection)
                                        (when (or (equal connection-type 'stdio)
                                                  (equal connection-type 'http))
-                                         (mcp--send-initial-message connection))
+                                         (mcp--send-initial-message connection t))
                                      (error "Process start error"))
                                  (error
                                   (mcp-stop-server (jsonrpc-name connection))
@@ -936,10 +944,12 @@ On error, it displays an error message with the code from the server."
                                      (message "Sadly, %s mpc server reports %s: %s"
                                               (jsonrpc-name connection) code message))))
 
-(defun mcp-async-initialize-message (connection callback &optional error-callback)
+(defun mcp-async-initialize-message (connection check-sse callback &optional error-callback)
   "Sending an `initialize' request to the CONNECTION.
 
 CONNECTION is the MCP connection object.
+CHECK-SSE is an optional boolean flag indicating whether to verify is SSE
+mcp server before sending.
 CALLBACK is a function to call upon successful initialization.
 ERROR-CALLBACK is an optional function to call if an error occurs.
 
@@ -962,10 +972,16 @@ with the client's capabilities and version information."
                                       (jsonrpc-name connection) code message)))
                          :timeout mcp-server-start-time
                          :timeout-fn (lambda ()
-                                       (if error-callback
-                                           (funcall error-callback 124 "timeout")
-                                         (message "Sadly, mcp server (%s) timed out"
-                                                  (jsonrpc-name connection))))))
+                                       (if check-sse
+                                           (unless (mcp--sse connection)
+                                             (if error-callback
+                                                 (funcall error-callback 124 "timeout")
+                                               (message "Sadly, mcp server (%s) timed out"
+                                                        (jsonrpc-name connection))))
+                                         (if error-callback
+                                             (funcall error-callback 124 "timeout")
+                                           (message "Sadly, mcp server (%s) timed out"
+                                                    (jsonrpc-name connection)))))))
 
 (defun mcp-async-list-tools (connection &optional callback error-callback)
   "Get a list of tools from the MCP server using the provided CONNECTION.
