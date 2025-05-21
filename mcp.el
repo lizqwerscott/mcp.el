@@ -394,15 +394,17 @@ The message is sent differently based on connection type:
                          (when-let* ((event-line event-line)
                                      (data-size (string-to-number (string-trim data-size-line)
                                                                   16))
-                                     (event-type (if (string-match "ping" event-line)
+                                     (event-type (if (string-prefix-p ": ping" event-line)
                                                      'ping
                                                    (intern (string-trim (substring event-line 6)))))
-                                     (body-size (length (string-trim (string-join (cdr data-line) "\n"))))
+                                     (body-size (let ((len 0))
+                                                  (dolist (i (cdr data-line)) (setq len (+ len (length i))))
+                                                  (+ len (length (cdr data-line)) -1)))
                                      (rest-size (- data-size
-                                                   2
+                                                   2 ; \r\n after data-size
                                                    ;; only sse need add 2
                                                    (if (mcp--sse conn)
-                                                       2
+                                                       2 ; \r\n after the last data-line
                                                      0)
                                                    body-size)))
                            (pcase event-type
@@ -414,7 +416,7 @@ The message is sent differently based on connection type:
                                   (setf (mcp--endpoint conn) endpoint)
                                   (mcp--send-initial-message conn))))
                              ('message
-                              (if (= 0 rest-size)
+                              (if (>= 0 rest-size)
                                   (push data
                                         parsed-messages)
                                 (process-put proc 'jsonrpc-message-rest-size rest-size)
@@ -504,7 +506,8 @@ The message is sent differently based on connection type:
                                       port
                                       :type (if (mcp--tls conn)
                                                 'tls
-                                              'network)))))
+                                              'network)
+                                      :coding 'utf-8-unix))))
     (let* ((stderr-buffer-name (format "*%s stderr*" name))
            (stderr-buffer (jsonrpc--forwarding-buffer stderr-buffer-name "[stderr] " conn))
            (hidden-name (concat " " stderr-buffer-name)))
@@ -739,7 +742,7 @@ in the `mcp-server-connections` hash table for future reference."
                                :command (append (list command)
                                                 (plist-get server-config :args))
                                :connection-type 'pipe
-                               :coding 'utf-8-emacs-unix
+                               :coding 'utf-8-unix
                                ;; :noquery t
                                :stderr (get-buffer-create
                                         (format "*%s stderr*" name))
