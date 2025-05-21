@@ -84,6 +84,11 @@ Available levels:
           (const :tag "alert" alert)
           (const :tag "emergency" emergency)))
 
+(defcustom mcp-log-size nil
+  "Maximum size for logging jsonrpc event.  0 disables, nil means infinite."
+  :group 'mcp
+  :type 'integer)
+
 (defclass mcp-process-connection (jsonrpc-process-connection)
   ((connection-type
     :initarg :connection-type
@@ -749,6 +754,7 @@ in the `mcp-server-connections` hash table for future reference."
                                  :connection-type ,connection-type
                                  :name ,name
                                  :process ,process
+                                 :events-buffer-config (:size ,mcp-log-size)
                                  :request-dispatcher ,(lambda (_ method params)
                                                         (funcall #'mcp-request-dispatcher name method params))
                                  :notification-dispatcher ,(lambda (connection method params)
@@ -987,12 +993,7 @@ with the client's capabilities and version information."
                                       (jsonrpc-name connection) code message)))
                          :timeout mcp-server-start-time
                          :timeout-fn (lambda ()
-                                       (if check-sse
-                                           (unless (mcp--sse connection)
-                                             (if error-callback
-                                                 (funcall error-callback 124 "timeout")
-                                               (message "Sadly, mcp server (%s) timed out"
-                                                        (jsonrpc-name connection))))
+                                       (unless (and check-sse (mcp--sse connection))
                                          (if error-callback
                                              (funcall error-callback 124 "timeout")
                                            (message "Sadly, mcp server (%s) timed out"
