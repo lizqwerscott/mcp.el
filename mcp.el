@@ -457,8 +457,12 @@ The message is sent differently based on connection type:
                                          :null-object nil
                                          :false-object :json-false))
               (json-parse-error
-               ;; parse error and not because of incomplete json
-               (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) json-str))
+               ;; For incomplete JSON, save to buffer instead of warning
+               (if (equal type 'stdio)
+                   (with-current-buffer buf
+                     (erase-buffer)
+                     (insert json-str))
+                 (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) json-str)))
               (json-end-of-file
                ;; Save remaining data to pending for next processing
                (with-current-buffer buf
