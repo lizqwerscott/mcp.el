@@ -36,6 +36,16 @@ This is an Emacs client for interfacing with [[https://modelcontextprotocol.io/i
                                 :GRAPHLIT_ENVIRONMENT_ID "your-environment-id"
                                 :GRAPHLIT_JWT_SECRET "your-jwt-secret")))))
 #+end_src
+
+To add JSON configurations for other clients, configure =mcp-hub-servers-config-path=. The default configuration file locations for Claude Desktop on macOS and Windows.
+Then, call =mcp-hub-load-server-configs= to load these configurations into =mcp-hub-servers=.
+#+begin_src elisp
+  (add-to-list mcp-hub-servers-config-path
+               "~/Library/Application Support/Claude/claude_desktop_config.json")
+
+  (mcp-hub-load-server-configs)
+#+end_src
+
 You can use =mcp-hub-start-all-server= to start all MCP servers, such as launching all MCP servers after starting Emacs.
 #+begin_src elisp
   (add-hook 'after-init-hook
