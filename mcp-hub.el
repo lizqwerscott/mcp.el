@@ -37,6 +37,68 @@ Each server configuration is a list of the form
   :group 'mcp-hub
   :type '(list (cons string (list symbol string))))
 
+(defcustom mcp-hub-servers-config-path `(,@(when (eq system-type 'windows-nt)
+                                             (list (file-truename "%APPDATA%\\Claude\\claude_desktop_config.json")))
+                                         ,@(when (eq system-type 'darwin)
+                                             (list (file-truename "~/Library/Application Support/Claude/claude_desktop_config.json"))))
+  "List of paths to search for MCP server configuration files.
+On Windows, looks in %APPDATA%\\Claude\\claude_desktop_config.json.
+On macOS, looks in ~/Library/Application Support/Claude/claude_desktop_config.json.
+The first valid configuration file found will be used."
+  :group 'mcp-hub
+  :type '(list string))
+
+(defun mcp-hub--load-server-config (file-path)
+  "Load MCP server configuration from JSON file at FILE-PATH.
+Parse the JSON data and extract MCP server configurations.
+Return a list of server configurations where each element is a cons cell
+of the form (NAME . CONFIG-PLIST), where:
+- NAME is a string identifying the server
+- CONFIG-PLIST is a property list containing server configuration
+
+The JSON file should contain an :mcpServers property with server configurations."
+  (when-let* ((json-data (with-temp-buffer
+                           (insert-file-contents file-path)
+                           (goto-char (point-min))
+                           (json-parse-buffer :object-type 'plist
+                                              :null-object nil
+                                              :false-object :json-false)))
+              (mcp-servers (plist-get json-data :mcpServers)))
+    (mapcar #'(lambda (server)
+                (let ((name (substring (symbol-name (car server))
+                                       1))
+                      (config (car (cdr server))))
+                  (when (plist-member config :args)
+                    (plist-put config
+                               :args
+                               (append (plist-get config :args)
+                                       nil)))
+                  (cons name config)))
+            (seq-partition mcp-servers 2))))
+
+(defun mcp-hub-load-server-configs ()
+  "Load MCP server configurations from all known configuration paths.
+Search paths are defined in `mcp-hub-servers-config-path'.
+Valid configurations found are merged into `mcp-hub-servers',
+skipping any servers that are already configured.
+
+If an error occurs while loading a configuration file, it is logged
+but does not interrupt loading of other configuration files."
+  (dolist (path mcp-hub-servers-config-path)
+    (condition-case err
+        (let ((config (mcp-hub--load-server-config path)))
+          (setq mcp-hub-servers
+                (append mcp-hub-servers
+                        (cl-remove-if #'(lambda (server)
+                                          (message "server: %s" (car server))
+                                          (cl-find (car server)
+                                                   mcp-hub-servers
+                                                   :test #'string=
+                                                   :key #'car))
+                                      config))))
+      (error
+       (message "load %s config error: %s" path err)))))
+
 (defun mcp-hub--start-server (server &optional inited-callback)
   "Start an MCP server with the given configuration.
 SERVER should be a cons cell of the form (NAME . CONFIG) where:
