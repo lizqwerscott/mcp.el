@@ -199,17 +199,17 @@ Example:
               (res (split-string status-line " "))
               (status-code (elt res 1)))
     (plist-put (apply #'append
-                      (mapcar #'(lambda (line)
-                                  (when-let* ((line (string-trim line))
-                                              (search-sep-pos (string-search ":" line)))
-                                    (list (intern
-                                           (concat ":"
-                                                   (downcase
-                                                    (string-trim
-                                                     (substring line 0 search-sep-pos)))))
-                                          (string-trim
-                                           (substring line
-                                                      (+ search-sep-pos 1))))))
+                      (mapcar (lambda (line)
+                                (when-let* ((line (string-trim line))
+                                            (search-sep-pos (string-search ":" line)))
+                                  (list (intern
+                                         (concat ":"
+                                                 (downcase
+                                                  (string-trim
+                                                   (substring line 0 search-sep-pos)))))
+                                        (string-trim
+                                         (substring line
+                                                    (+ search-sep-pos 1))))))
                               (cdr header-lines)))
                :response-code
                status-code)))
@@ -273,44 +273,44 @@ The message is sent differently based on connection type:
                               endpoint
                             (mcp--path connection)))))
          (url-retrieve url
-                       #'(lambda (_)
-                           (when (buffer-live-p (current-buffer))
-                             (goto-char (point-min))
-                             (when (search-forward "\n\n" nil t)
-                               (let* ((headers (buffer-substring (point-min) (point)))
-                                      (body (buffer-substring (point) (point-max)))
-                                      (headers-plist (mcp--parse-http-header headers))
-                                      (session-id (plist-get headers-plist :mcp-session-id))
-                                      (response-code (plist-get headers-plist :response-code)))
-                                 (when (string= "4"
-                                                (substring response-code 0 1))
-                                   (setf (mcp--sse connection) t))
-                                 (when session-id
-                                   (setf (mcp--session-id connection)
-                                         session-id))
-                                 ;; connect sse
-                                 (unless (jsonrpc--process connection)
-                                   (mcp--connect-sse connection))
-                                 (unless (mcp--sse connection)
-                                   (when-let* ((content-type (plist-get headers-plist :content-type)))
-                                     (when (string= content-type "text/event-stream")
-                                       (let ((data)
-                                             (json))
-                                         (dolist (line (split-string body "\n"))
-                                           (cond
-                                            ((string-prefix-p "data: " line)
-                                             (setq data (string-trim (substring line 5))))))
-                                         (condition-case-unless-debug err
-                                             (setq json (json-parse-string data
-                                                                           :object-type 'plist
-                                                                           :null-object nil
-                                                                           :false-object :json-false))
-                                           (json-parse-error
-                                            ;; parse error and not because of incomplete json
-                                            (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
-                                         (when json
-                                           (jsonrpc-connection-receive connection json))))))))
-                             (kill-buffer))))))
+                       (lambda (_)
+                         (when (buffer-live-p (current-buffer))
+                           (goto-char (point-min))
+                           (when (search-forward "\n\n" nil t)
+                             (let* ((headers (buffer-substring (point-min) (point)))
+                                    (body (buffer-substring (point) (point-max)))
+                                    (headers-plist (mcp--parse-http-header headers))
+                                    (session-id (plist-get headers-plist :mcp-session-id))
+                                    (response-code (plist-get headers-plist :response-code)))
+                               (when (string= "4"
+                                              (substring response-code 0 1))
+                                 (setf (mcp--sse connection) t))
+                               (when session-id
+                                 (setf (mcp--session-id connection)
+                                       session-id))
+                               ;; connect sse
+                               (unless (jsonrpc--process connection)
+                                 (mcp--connect-sse connection))
+                               (unless (mcp--sse connection)
+                                 (when-let* ((content-type (plist-get headers-plist :content-type)))
+                                   (when (string= content-type "text/event-stream")
+                                     (let ((data)
+                                           (json))
+                                       (dolist (line (split-string body "\n"))
+                                         (cond
+                                          ((string-prefix-p "data: " line)
+                                           (setq data (string-trim (substring line 5))))))
+                                       (condition-case-unless-debug err
+                                           (setq json (json-parse-string data
+                                                                         :object-type 'plist
+                                                                         :null-object nil
+                                                                         :false-object :json-false))
+                                         (json-parse-error
+                                          ;; parse error and not because of incomplete json
+                                          (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
+                                       (when json
+                                         (jsonrpc-connection-receive connection json))))))))
+                           (kill-buffer))))))
       ('stdio
        (process-send-string
         (jsonrpc--process connection)
@@ -635,49 +635,49 @@ mcp server before sending."
   (mcp-async-initialize-message
    connection
    check-sse
-   #'(lambda (protocolVersion serverInfo capabilities)
-       (if (cl-find protocolVersion mcp--support-versions :test #'string=)
-           (progn
-             (message "[mcp] Connected! Server `MCP (%s)' now managing." (jsonrpc-name connection))
-             (setf (mcp--capabilities connection) capabilities
-                   (mcp--server-info connection) serverInfo)
-             ;; Notify server initialized
-             (mcp-notify connection
-                         :notifications/initialized)
-             (when (mcp--initial-callback connection)
-               (funcall (mcp--initial-callback connection) connection))
-             (run-with-idle-timer mcp-server-wait-initial-time
-                                  nil
-                                  #'(lambda ()
-                                      ;; handle logging
-                                      (when (plist-member capabilities :logging)
-                                        (mcp-async-set-log-level connection mcp-log-level))
-                                      ;; Get prompts
-                                      (when (plist-member capabilities :prompts)
-                                        (mcp-async-list-prompts connection (mcp--prompts-callback connection)))
-                                      ;; Get tools
-                                      (when (plist-member capabilities :tools)
-                                        (mcp-async-list-tools connection (mcp--tools-callback connection)))
-                                      ;; Get resources
-                                      (when (plist-member capabilities :resources)
-                                        (mcp-async-list-resources connection (mcp--resources-callback connection)))
-                                      ;; Get templace resources
-                                      (when (plist-member capabilities :resources)
-                                        (mcp-async-list-resource-templates connection (mcp--resources-templates-callback connection)))))
-             (setf (mcp--status connection) 'connected))
+   (lambda (protocolVersion serverInfo capabilities)
+     (if (cl-find protocolVersion mcp--support-versions :test #'string=)
          (progn
-           (message "[mcp] Error %s server protocolVersion(%s) not support, client Version: %s."
-                    (jsonrpc-name connection)
-                    protocolVersion
-                    mcp--support-versions)
-           (mcp-stop-server (jsonrpc-name connection)))))
-   #'(lambda (code message)
-       (mcp-stop-server (jsonrpc-name connection))
-       (setf (mcp--status connection) 'error)
-       (when (mcp--error-callback connection)
-         (funcall (mcp--error-callback connection) code message))
-       (message "Sadly, %s mpc server reports %s: %s"
-                (jsonrpc-name connection) code message))))
+           (message "[mcp] Connected! Server `MCP (%s)' now managing." (jsonrpc-name connection))
+           (setf (mcp--capabilities connection) capabilities
+                 (mcp--server-info connection) serverInfo)
+           ;; Notify server initialized
+           (mcp-notify connection
+                       :notifications/initialized)
+           (when (mcp--initial-callback connection)
+             (funcall (mcp--initial-callback connection) connection))
+           (run-with-idle-timer mcp-server-wait-initial-time
+                                nil
+                                (lambda ()
+                                  ;; handle logging
+                                  (when (plist-member capabilities :logging)
+                                    (mcp-async-set-log-level connection mcp-log-level))
+                                  ;; Get prompts
+                                  (when (plist-member capabilities :prompts)
+                                    (mcp-async-list-prompts connection (mcp--prompts-callback connection)))
+                                  ;; Get tools
+                                  (when (plist-member capabilities :tools)
+                                    (mcp-async-list-tools connection (mcp--tools-callback connection)))
+                                  ;; Get resources
+                                  (when (plist-member capabilities :resources)
+                                    (mcp-async-list-resources connection (mcp--resources-callback connection)))
+                                  ;; Get templace resources
+                                  (when (plist-member capabilities :resources)
+                                    (mcp-async-list-resource-templates connection (mcp--resources-templates-callback connection)))))
+           (setf (mcp--status connection) 'connected))
+       (progn
+         (message "[mcp] Error %s server protocolVersion(%s) not support, client Version: %s."
+                  (jsonrpc-name connection)
+                  protocolVersion
+                  mcp--support-versions)
+         (mcp-stop-server (jsonrpc-name connection)))))
+   (lambda (code message)
+     (mcp-stop-server (jsonrpc-name connection))
+     (setf (mcp--status connection) 'error)
+     (when (mcp--error-callback connection)
+       (funcall (mcp--error-callback connection) code message))
+     (message "Sadly, %s mpc server reports %s: %s"
+              (jsonrpc-name connection) code message))))
 
 (defun mcp--server-running-p (name)
   "Return non-nil if server NAME is in running state."
@@ -728,11 +728,11 @@ in the `mcp-server-connections` hash table for future reference."
                 (process (pcase connection-type
                            ('http 'empty)
                            ('stdio
-                            (let ((env (mapcar #'(lambda (item)
-                                                   (pcase-let* ((`(,key ,value) item))
-                                                     (let ((key (symbol-name key)))
-                                                       (list (substring key 1)
-                                                             (format "%s" value)))))
+                            (let ((env (mapcar (lambda (item)
+                                                 (pcase-let* ((`(,key ,value) item))
+                                                   (let ((key (symbol-name key)))
+                                                     (list (substring key 1)
+                                                           (format "%s" value)))))
                                                (seq-partition env 2)))
                                   (process-environment (copy-sequence process-environment)))
                               (when env
@@ -821,12 +821,12 @@ with :name, :type, and :optional fields.
 Returns a list of parsed argument plists."
   (let ((need-length (- (/ (length properties) 2)
                         (length required))))
-    (cl-mapcar #'(lambda (arg-value required-name)
-                   (pcase-let* ((`(,key ,value) arg-value))
-                     `( :name ,(substring (symbol-name key) 1)
-                        ,@value
-                        ,@(unless required-name
-                            `(:optional t)))))
+    (cl-mapcar (lambda (arg-value required-name)
+                 (pcase-let* ((`(,key ,value) arg-value))
+                   `( :name ,(substring (symbol-name key) 1)
+                      ,@value
+                      ,@(unless required-name
+                          `(:optional t)))))
                (seq-partition properties 2)
                (append required
                        (when (> need-length 0)
@@ -844,9 +844,9 @@ a single string if multiple text entries are present.
 Returns the concatenated text or nil if no text content is found."
   (string-join
    (cl-remove-if #'null
-                 (mapcar #'(lambda (content)
-                             (when (string= "text" (plist-get content :type))
-                               (plist-get content :text)))
+                 (mapcar (lambda (content)
+                           (when (string= "text" (plist-get content :type))
+                             (plist-get content :text)))
                          (plist-get res :content)))
    "\n"))
 
@@ -863,13 +863,13 @@ Returns a plist of argument names and values ready for tool invocation."
   (let ((need-length (- (/ (length properties) 2)
                         (length args))))
     (apply #'append
-           (cl-mapcar #'(lambda (arg value)
-                          (when-let* ((value (if value
-                                                 value
-                                               (plist-get (cl-second arg)
-                                                          :default))))
-                            (list (cl-first arg)
-                                  value)))
+           (cl-mapcar (lambda (arg value)
+                        (when-let* ((value (if value
+                                               value
+                                             (plist-get (cl-second arg)
+                                                        :default))))
+                          (list (cl-first arg)
+                                value)))
                       (seq-partition properties 2)
                       (append args
                               (when (> need-length 0)
@@ -890,38 +890,38 @@ The tool is configured to handle input arguments, call the server, and process
 the response to extract and return text content."
   (when-let* ((connection (gethash name mcp-server-connections))
               (tools (mcp--tools connection))
-              (tool (cl-find tool-name tools :test #'equal :key #'(lambda (tool) (plist-get tool :name)))))
+              (tool (cl-find tool-name tools :test #'equal :key (lambda (tool) (plist-get tool :name)))))
     (cl-destructuring-bind (&key description ((:inputSchema input-schema)) &allow-other-keys) tool
       (cl-destructuring-bind (&key properties required &allow-other-keys) input-schema
         (list
          :function (if asyncp
-                       #'(lambda (callback &rest args)
-                           (when (< (length args) (length required))
-                             (error "Error: args not match: %s -> %s" required args))
-                           (if-let* ((connection (gethash name mcp-server-connections)))
-                               (mcp-async-call-tool connection
-                                                    tool-name
-                                                    (mcp--generate-tool-call-args args properties)
-                                                    #'(lambda (res)
-                                                        (funcall callback
-                                                                 (mcp--parse-tool-call-result res)))
-                                                    #'(lambda (code message)
-                                                        (funcall callback
-                                                                 (format "call %s tool error with %s: %s"
-                                                                         tool-name
-                                                                         code
-                                                                         message))))
-                             (error "Error: %s server not connect" name)))
-                     #'(lambda (&rest args)
+                       (lambda (callback &rest args)
                          (when (< (length args) (length required))
                            (error "Error: args not match: %s -> %s" required args))
                          (if-let* ((connection (gethash name mcp-server-connections)))
-                             (if-let* ((res (mcp-call-tool connection
-                                                           tool-name
-                                                           (mcp--generate-tool-call-args args properties))))
-                                 (mcp--parse-tool-call-result res)
-                               (error "Error: call %s tool error" tool-name))
-                           (error "Error: %s server not connect" name))))
+                             (mcp-async-call-tool connection
+                                                  tool-name
+                                                  (mcp--generate-tool-call-args args properties)
+                                                  (lambda (res)
+                                                    (funcall callback
+                                                             (mcp--parse-tool-call-result res)))
+                                                  (lambda (code message)
+                                                    (funcall callback
+                                                             (format "call %s tool error with %s: %s"
+                                                                     tool-name
+                                                                     code
+                                                                     message))))
+                           (error "Error: %s server not connect" name)))
+                     (lambda (&rest args)
+                       (when (< (length args) (length required))
+                         (error "Error: args not match: %s -> %s" required args))
+                       (if-let* ((connection (gethash name mcp-server-connections)))
+                           (if-let* ((res (mcp-call-tool connection
+                                                         tool-name
+                                                         (mcp--generate-tool-call-args args properties))))
+                               (mcp--parse-tool-call-result res)
+                             (error "Error: call %s tool error" tool-name))
+                         (error "Error: %s server not connect" name))))
          :name tool-name
          :async asyncp
          :description description
@@ -948,8 +948,8 @@ On error, displays an error message with the server's response code and message.
                          :logging/setLevel
                          (list :level (format "%s" log-level))
                          :success-fn
-                         #'(lambda (res)
-                             (message "[mcp] setLevel success: %s" res))
+                         (lambda (res)
+                           (message "[mcp] setLevel success: %s" res))
                          :error-fn (jsonrpc-lambda (&key code message _data)
                                      (message "Sadly, %s mpc server reports %s: %s"
                                               (jsonrpc-name connection) code message))))
@@ -964,8 +964,8 @@ On error, it displays an error message with the code from the server."
                          :ping
                          nil
                          :success-fn
-                         #'(lambda (res)
-                             (message "[mcp] ping success: %s" res))
+                         (lambda (res)
+                           (message "[mcp] ping success: %s" res))
                          :error-fn (jsonrpc-lambda (&key code message _data)
                                      (message "Sadly, %s mpc server reports %s: %s"
                                               (jsonrpc-name connection) code message))))
@@ -987,9 +987,9 @@ with the client's capabilities and version information."
                                :capabilities '(:roots (:listChanged t))
                                :clientInfo '(:name "mcp-emacs" :version "0.1.0"))
                          :success-fn
-                         #'(lambda (res)
-                             (cl-destructuring-bind (&key protocolVersion serverInfo capabilities &allow-other-keys) res
-                               (funcall callback protocolVersion serverInfo capabilities)))
+                         (lambda (res)
+                           (cl-destructuring-bind (&key protocolVersion serverInfo capabilities &allow-other-keys) res
+                             (funcall callback protocolVersion serverInfo capabilities)))
                          :error-fn
                          (jsonrpc-lambda (&key code message _data)
                            (if error-callback
@@ -1017,12 +1017,12 @@ The result is stored in the `mcp--tools' slot of the CONNECTION object."
                          :tools/list
                          '(:cursor "")
                          :success-fn
-                         #'(lambda (res)
-                             (cl-destructuring-bind (&key tools &allow-other-keys) res
-                               (setf (mcp--tools connection)
-                                     tools)
-                               (when callback
-                                 (funcall callback connection tools))))
+                         (lambda (res)
+                           (cl-destructuring-bind (&key tools &allow-other-keys) res
+                             (setf (mcp--tools connection)
+                                   tools)
+                             (when callback
+                               (funcall callback connection tools))))
                          :error-fn
                          (jsonrpc-lambda (&key code message _data)
                            (if error-callback
@@ -1058,8 +1058,8 @@ ERROR-CALLBACK is a function to call on error."
                                               arguments
                                             #s(hash-table)))
                          :success-fn
-                         #'(lambda (res)
-                             (funcall callback res))
+                         (lambda (res)
+                           (funcall callback res))
                          :error-fn
                          (jsonrpc-lambda (&key code message _data)
                            (funcall error-callback code message))))
@@ -1077,12 +1077,12 @@ The result is stored in the `mcp--prompts' slot of the CONNECTION object."
                          :prompts/list
                          '(:cursor "")
                          :success-fn
-                         #'(lambda (res)
-                             (cl-destructuring-bind (&key prompts &allow-other-keys) res
-                               (setf (mcp--prompts connection)
-                                     prompts)
-                               (when callback
-                                 (funcall callback connection prompts))))
+                         (lambda (res)
+                           (cl-destructuring-bind (&key prompts &allow-other-keys) res
+                             (setf (mcp--prompts connection)
+                                   prompts)
+                             (when callback
+                               (funcall callback connection prompts))))
                          :error-fn
                          (jsonrpc-lambda (&key code message _data)
                            (if error-callback
@@ -1118,8 +1118,8 @@ ERROR-CALLBACK is a function to call on error."
                                               arguments
                                             #s(hash-table)))
                          :success-fn
-                         #'(lambda (res)
-                             (funcall callback res))
+                         (lambda (res)
+                           (funcall callback res))
                          :error-fn
                          (jsonrpc-lambda (&key code message _data)
                            (funcall error-callback code message))))
@@ -1136,12 +1136,12 @@ The result is stored in the `mcp--resources' slot of the CONNECTION object."
                          :resources/list
                          '(:cursor "")
                          :success-fn
-                         #'(lambda (res)
-                             (cl-destructuring-bind (&key resources &allow-other-keys) res
-                               (setf (mcp--resources connection)
-                                     resources)
-                               (when callback
-                                 (funcall callback connection resources))))
+                         (lambda (res)
+                           (cl-destructuring-bind (&key resources &allow-other-keys) res
+                             (setf (mcp--resources connection)
+                                   resources)
+                             (when callback
+                               (funcall callback connection resources))))
                          :error-fn
                          (jsonrpc-lambda (&key code message _data)
                            (if error-callback
@@ -1172,8 +1172,8 @@ succeeds, or ERROR-CALLBACK if it fails."
                          :resources/read
                          (list :uri uri)
                          :success-fn
-                         #'(lambda (res)
-                             (funcall callback res))
+                         (lambda (res)
+                           (funcall callback res))
                          :error-fn
                          (jsonrpc-lambda (&key code message _data)
                            (funcall error-callback code message))))
@@ -1188,12 +1188,12 @@ function to call if an error occurs during the request."
                          :resources/templates/list
                          '(:cursor "")
                          :success-fn
-                         #'(lambda (res)
-                             (cl-destructuring-bind (&key resourceTemplates &allow-other-keys) res
-                               (setf (mcp--template-resources connection)
-                                     resourceTemplates)
-                               (when callback
-                                 (funcall callback connection resourceTemplates))))
+                         (lambda (res)
+                           (cl-destructuring-bind (&key resourceTemplates &allow-other-keys) res
+                             (setf (mcp--template-resources connection)
+                                   resourceTemplates)
+                             (when callback
+                               (funcall callback connection resourceTemplates))))
                          :error-fn
                          (jsonrpc-lambda (&key code message _data)
                            (if error-callback

@@ -52,25 +52,25 @@ receives no arguments."
          (append (list (car server))
                  (cdr server)
                  (list :initial-callback
-                       #'(lambda (_)
-                           (mcp-hub-update))
+                       (lambda (_)
+                         (mcp-hub-update))
                        :tools-callback
-                       #'(lambda (_ _)
-                           (mcp-hub-update)
-                           (when inited-callback
-                             (funcall inited-callback)))
+                       (lambda (_ _)
+                         (mcp-hub-update)
+                         (when inited-callback
+                           (funcall inited-callback)))
                        :prompts-callback
-                       #'(lambda (_ _)
-                           (mcp-hub-update))
+                       (lambda (_ _)
+                         (mcp-hub-update))
                        :resources-callback
-                       #'(lambda (_ _)
-                           (mcp-hub-update))
+                       (lambda (_ _)
+                         (mcp-hub-update))
                        :resources-templates-callback
-                       #'(lambda (_ _)
-                           (mcp-hub-update))
+                       (lambda (_ _)
+                         (mcp-hub-update))
                        :error-callback
-                       #'(lambda (_ _)
-                           (mcp-hub-update))))))
+                       (lambda (_ _)
+                         (mcp-hub-update))))))
 
 ;;;###autoload
 (cl-defun mcp-hub-get-all-tool (&key asyncp categoryp)
@@ -91,22 +91,22 @@ Example:
   (mcp-hub-get-all-tool)  ; Get all tools synchronously
   (mcp-hub-get-all-tool t)  ; Get all tools asynchronously"
   (let ((res ))
-    (maphash #'(lambda (name server)
-                 (when (and server
+    (maphash (lambda (name server)
+               (when (and server
                           (equal (mcp--status server)
                                  'connected))
-                   (when-let* ((tools (mcp--tools server))
-                               (tool-names (mapcar #'(lambda (tool) (plist-get tool :name)) tools)))
-                     (dolist (tool-name tool-names)
-                       (push (let ((tool (mcp-make-text-tool name tool-name asyncp)))
-                               (if categoryp
-                                   (plist-put
-                                    tool
-                                    :category
-                                    (format "mcp-%s"
-                                            name))
-                                 tool))
-                             res)))))
+                 (when-let* ((tools (mcp--tools server))
+                             (tool-names (mapcar (lambda (tool) (plist-get tool :name)) tools)))
+                   (dolist (tool-name tool-names)
+                     (push (let ((tool (mcp-make-text-tool name tool-name asyncp)))
+                             (if categoryp
+                                 (plist-put
+                                  tool
+                                  :category
+                                  (format "mcp-%s"
+                                          name))
+                               tool))
+                           res)))))
              mcp-server-connections)
     (nreverse res)))
 
@@ -180,17 +180,17 @@ Returns a list of server statuses, where each status is a plist containing:
 - :resources - Available resources (if connected)
 - :template-resources - Available template resources (if connected)
 - :prompts - Available prompts (if connected)"
-  (mapcar #'(lambda (server)
-              (let ((name (car server)))
-                (if-let* ((connection (gethash name mcp-server-connections)))
-                    (list :name name
-                          :type (mcp--connection-type connection)
-                          :status (mcp--status connection)
-                          :tools (mcp--tools connection)
-                          :resources (mcp--resources connection)
-                          :template-resources (mcp--template-resources connection)
-                          :prompts (mcp--prompts connection))
-                  (list :name name :status 'stop))))
+  (mapcar (lambda (server)
+            (let ((name (car server)))
+              (if-let* ((connection (gethash name mcp-server-connections)))
+                  (list :name name
+                        :type (mcp--connection-type connection)
+                        :status (mcp--status connection)
+                        :tools (mcp--tools connection)
+                        :resources (mcp--resources connection)
+                        :template-resources (mcp--template-resources connection)
+                        :prompts (mcp--prompts connection))
+                (list :name name :status 'stop))))
           mcp-hub-servers))
 
 (defun mcp-hub-update ()
@@ -202,35 +202,35 @@ including connection status, available tools, resources, template resources and
 prompts."
   (interactive)
   (when-let* ((server-list (mcp-hub-get-servers))
-              (server-show (mapcar #'(lambda (server)
-                                       (let* ((name (plist-get server :name))
-                                              (status (plist-get server :status)))
-                                         (append (list name
-                                                       (symbol-name (plist-get server :type))
-                                                       (pcase status
-                                                         ('connected
-                                                          (propertize (symbol-name status)
-                                                                      'face 'success))
-                                                         ('error
-                                                          (propertize (symbol-name status)
-                                                                      'face 'error))
-                                                         (_
-                                                          (symbol-name status))))
-                                                 (if (equal status 'connected)
-                                                     (mapcar #'(lambda (x)
-                                                                 (format "%d"
-                                                                         (length x)))
-                                                             (list (plist-get server :tools)
-                                                                   (plist-get server :resources)
-                                                                   (plist-get server :template-resources)
-                                                                   (plist-get server :prompts)))
-                                                   (list "nil" "nil" "nil" "nil")))))
+              (server-show (mapcar (lambda (server)
+                                     (let* ((name (plist-get server :name))
+                                            (status (plist-get server :status)))
+                                       (append (list name
+                                                     (symbol-name (plist-get server :type))
+                                                     (pcase status
+                                                       ('connected
+                                                        (propertize (symbol-name status)
+                                                                    'face 'success))
+                                                       ('error
+                                                        (propertize (symbol-name status)
+                                                                    'face 'error))
+                                                       (_
+                                                        (symbol-name status))))
+                                               (if (equal status 'connected)
+                                                   (mapcar (lambda (x)
+                                                             (format "%d"
+                                                                     (length x)))
+                                                           (list (plist-get server :tools)
+                                                                 (plist-get server :resources)
+                                                                 (plist-get server :template-resources)
+                                                                 (plist-get server :prompts)))
+                                                 (list "nil" "nil" "nil" "nil")))))
                                    server-list)))
     (with-current-buffer (get-buffer-create "*Mcp-Hub*")
       (setq tabulated-list-entries
-            (cl-mapcar #'(lambda (statu index)
-                           (list (format "%d" index)
-                                 (vconcat statu)))
+            (cl-mapcar (lambda (statu index)
+                         (list (format "%d" index)
+                               (vconcat statu)))
                        server-show
                        (number-sequence 1 (length server-list))))
       (tabulated-list-print t))))
