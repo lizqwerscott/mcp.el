@@ -802,7 +802,8 @@ from `mcp-server-connections'. If no server with the given NAME is found,
 a message will be displayed indicating that the server is not running."
   (if-let* ((connection (gethash name mcp-server-connections)))
       (progn
-        (jsonrpc-shutdown connection)
+        (ignore-errors
+          (jsonrpc-shutdown connection))
         (setf (mcp--status connection) 'stop))
     (message "mcp %s server not started" name)))
 
