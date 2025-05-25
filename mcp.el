@@ -5,7 +5,7 @@
 ;; Author: lizqwer scott <lizqwerscott@gmail.com>
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "30.1") (jsonrpc "1.0.25"))
-;; Keywords: ai, mcp
+;; Keywords: tools
 ;; URL: https://github.com/lizqwerscott/mcp.el
 
 ;; This program is free software; you can redistribute it and/or modify
