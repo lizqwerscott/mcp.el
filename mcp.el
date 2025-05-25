@@ -24,7 +24,7 @@
 ;;; Commentary:
 
 ;; mcp is an Emacs client for interfacing with
-;; [[https://modelcontextprotocol.io/introduction][MCP]], supporting
+;; [MCP](https://modelcontextprotocol.io/introduction), supporting
 ;; connections to MCP servers.
 ;;
 ;; Features:
