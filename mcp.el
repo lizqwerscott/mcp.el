@@ -998,7 +998,9 @@ with the client's capabilities and version information."
                                       (jsonrpc-name connection) code message)))
                          :timeout mcp-server-start-time
                          :timeout-fn (lambda ()
-                                       (unless (and check-sse (mcp--sse connection))
+                                       (unless (and check-sse
+                                                    (mcp-http-process-connection-p connection)
+                                                    (mcp--sse connection))
                                          (if error-callback
                                              (funcall error-callback 124 "timeout")
                                            (message "Sadly, mcp server (%s) timed out"
