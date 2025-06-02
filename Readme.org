@@ -1,5 +1,6 @@
 #+TITLE: MCP.el - Model Context Protocol for Emacs
 
+[[https://melpa.org/#/mcp][file:https://melpa.org/packages/mcp-badge.svg]]
 [[https://www.gnu.org/licenses/gpl-3.0][https://img.shields.io/badge/License-GPLv3-blue.svg]]
 
 This is an Emacs client for interfacing with [[https://modelcontextprotocol.io/introduction][MCP]], supporting connections to MCP servers.
@@ -14,12 +15,25 @@ This is an Emacs client for interfacing with [[https://modelcontextprotocol.io/i
 - Integration with popular Emacs packages (e.g., gptel, llm)
 
 * Installation
-1. Install Emacs 30 or higher version
-2. Add the following code to your configuration file ~/.emacs:
-   #+begin_src elisp
-     (add-to-list 'load-path "<path-to-mcp.el>")
-     (require 'mcp-hub)
-   #+end_src
+Need Emacs 30 or higher version
+#+begin_src elisp
+  (use-package mcp
+    :ensure t
+    :after gptel
+    :custom (mcp-hub-servers
+             `(("filesystem" . (:command "npx" :args ("-y" "@modelcontextprotocol/server-filesystem" "/home/lizqwer/MyProject/")))
+               ("fetch" . (:command "uvx" :args ("mcp-server-fetch")))
+               ("qdrant" . (:url "http://localhost:8000/sse"))
+               ("graphlit" . (
+                              :command "npx"
+                              :args ("-y" "graphlit-mcp-server")
+                              :env (
+                                    :GRAPHLIT_ORGANIZATION_ID "your-organization-id"
+                                    :GRAPHLIT_ENVIRONMENT_ID "your-environment-id"
+                                    :GRAPHLIT_JWT_SECRET "your-jwt-secret")))))
+    :config (require 'mcp-hub)
+    :hook (after-init . mcp-hub-start-all-server))
+#+end_src
 * Usage
 ** Mcp hub
 *** Configuring MCP Servers
