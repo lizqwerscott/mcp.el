@@ -259,12 +259,12 @@ The message is sent differently based on connection type:
        (let ((url-request-method "POST")
              (url-request-extra-headers
               `(("Content-Type" . "application/json")
-                ("Accept" . "application/json,text/event-stream")
                 ,@(when-let* ((session-id (mcp--session-id connection)))
                     `(("Mcp-Session-Id" . ,session-id)))))
              (url-request-data (encode-coding-string
                                 json
                                 'utf-8))
+             (url-mime-accept-string "text/event-stream, application/json")
              (url (format "%s://%s:%s%s"
                           (if (mcp--tls connection) "https" "http")
                           (mcp--host connection)
@@ -272,45 +272,47 @@ The message is sent differently based on connection type:
                           (if-let* ((endpoint (mcp--endpoint connection)))
                               endpoint
                             (mcp--path connection)))))
-         (url-retrieve url
-                       (lambda (_)
-                         (when (buffer-live-p (current-buffer))
-                           (goto-char (point-min))
-                           (when (search-forward "\n\n" nil t)
-                             (let* ((headers (buffer-substring (point-min) (point)))
-                                    (body (buffer-substring (point) (point-max)))
-                                    (headers-plist (mcp--parse-http-header headers))
-                                    (session-id (plist-get headers-plist :mcp-session-id))
-                                    (response-code (plist-get headers-plist :response-code)))
-                               (when (string= "4"
-                                              (substring response-code 0 1))
-                                 (setf (mcp--sse connection) t))
-                               (when session-id
-                                 (setf (mcp--session-id connection)
-                                       session-id))
-                               ;; connect sse
-                               (unless (jsonrpc--process connection)
-                                 (mcp--connect-sse connection))
-                               (unless (mcp--sse connection)
-                                 (when-let* ((content-type (plist-get headers-plist :content-type)))
-                                   (when (string= content-type "text/event-stream")
-                                     (let ((data)
-                                           (json))
-                                       (dolist (line (split-string body "\n"))
-                                         (cond
-                                          ((string-prefix-p "data: " line)
-                                           (setq data (string-trim (substring line 5))))))
-                                       (condition-case-unless-debug err
-                                           (setq json (json-parse-string data
-                                                                         :object-type 'plist
-                                                                         :null-object nil
-                                                                         :false-object :json-false))
-                                         (json-parse-error
-                                          ;; parse error and not because of incomplete json
-                                          (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
-                                       (when json
-                                         (jsonrpc-connection-receive connection json))))))))
-                           (kill-buffer))))))
+         (with-current-buffer
+             (url-retrieve url
+                           (lambda (_)
+                             (when (buffer-live-p (current-buffer))
+                               (goto-char (point-min))
+                               (when (search-forward "\n\n" nil t)
+                                 (let* ((headers (buffer-substring (point-min) (point)))
+                                        (body (buffer-substring (point) (point-max)))
+                                        (headers-plist (mcp--parse-http-header headers))
+                                        (session-id (plist-get headers-plist :mcp-session-id))
+                                        (response-code (plist-get headers-plist :response-code)))
+                                   (when (string= "4"
+                                                  (substring response-code 0 1))
+                                     (setf (mcp--sse connection) t))
+                                   (when session-id
+                                     (setf (mcp--session-id connection)
+                                           session-id))
+                                   ;; connect sse
+                                   (unless (jsonrpc--process connection)
+                                     (mcp--connect-sse connection))
+                                   (unless (mcp--sse connection)
+                                     (when-let* ((content-type (plist-get headers-plist :content-type)))
+                                       (when (string= content-type "text/event-stream")
+                                         (let ((data)
+                                               (json))
+                                           (dolist (line (split-string body "\n"))
+                                             (cond
+                                              ((string-prefix-p "data: " line)
+                                               (setq data (string-trim (substring line 5))))))
+                                           (condition-case-unless-debug err
+                                               (setq json (json-parse-string data
+                                                                             :object-type 'plist
+                                                                             :null-object nil
+                                                                             :false-object :json-false))
+                                             (json-parse-error
+                                              ;; parse error and not because of incomplete json
+                                              (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
+                                           (when json
+                                             (jsonrpc-connection-receive connection json))))))))
+                               (kill-buffer))))
+           (set (make-local-variable 'url-mime-accept-string) url-mime-accept-string))))
       ('stdio
        (process-send-string
         (jsonrpc--process connection)
