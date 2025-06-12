@@ -148,6 +148,9 @@ Available levels:
    (-tls
     :initarg :tls
     :accessor mcp--tls)
+   (-token
+    :initarg :token
+    :accessor mcp--token)
    (-sse
     :initform nil
     :accessor mcp--sse)
@@ -183,6 +186,16 @@ Available levels:
 (cl-defmethod jsonrpc-shutdown :after ((conn mcp-http-process-connection))
   "Return non-nil if JSONRPC connection CONN is running."
   (setf (mcp--running conn) nil))
+
+(defun mcp--resolve-value (value)
+  "Resolve VALUE's value.
+If it is function - call it.
+If it is a variable - return it's value
+Otherwise returns value itself."
+  (cond
+   ((functionp value) (funcall value))
+   ((and (symbolp value) (boundp value)) (symbol-value value))
+   (value)))
 
 (defun mcp--parse-http-header (headers)
   "Parse HTTP response headers into a plist.
@@ -262,7 +275,9 @@ The message is sent differently based on connection type:
              (url-request-extra-headers
               `(("Content-Type" . "application/json")
                 ,@(when-let* ((session-id (mcp--session-id connection)))
-                    `(("Mcp-Session-Id" . ,session-id)))))
+                    `(("Mcp-Session-Id" . ,session-id)))
+                ,@(when-let* ((token (mcp--resolve-value (mcp--token connection))))
+                    `(("Authorization" . ,(concat "Bearer " token))))))
              (url-request-data (encode-coding-string
                                 json
                                 'utf-8))
@@ -295,24 +310,26 @@ The message is sent differently based on connection type:
                                    (unless (jsonrpc--process connection)
                                      (mcp--connect-sse connection))
                                    (unless (mcp--sse connection)
-                                     (when-let* ((content-type (plist-get headers-plist :content-type)))
-                                       (when (string= content-type "text/event-stream")
-                                         (let ((data)
-                                               (json))
-                                           (dolist (line (split-string body "\n"))
-                                             (cond
-                                              ((string-prefix-p "data: " line)
-                                               (setq data (string-trim (substring line 5))))))
-                                           (condition-case-unless-debug err
-                                               (setq json (json-parse-string data
-                                                                             :object-type 'plist
-                                                                             :null-object nil
-                                                                             :false-object :json-false))
-                                             (json-parse-error
-                                              ;; parse error and not because of incomplete json
-                                              (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
-                                           (when json
-                                             (jsonrpc-connection-receive connection json))))))))
+                                     (let (data json)
+                                       (pcase (plist-get headers-plist :content-type)
+                                         ("text/event-stream"
+                                          (dolist (line (split-string body "\n"))
+                                            (cond
+                                             ((string-prefix-p "data: " line)
+                                              (setq data (string-trim (substring line 5)))))))
+                                         ("application/json"
+                                          (setq data body)))
+                                       (condition-case-unless-debug err
+                                           (when (stringp data)
+                                             (setq json (json-parse-string data
+                                                                           :object-type 'plist
+                                                                           :null-object nil
+                                                                           :false-object :json-false)))
+                                         (json-parse-error
+                                          ;; parse error and not because of incomplete json
+                                          (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
+                                       (when json
+                                         (jsonrpc-connection-receive connection json))))))
                                (kill-buffer))))
            (set (make-local-variable 'url-mime-accept-string) url-mime-accept-string))))
       ('stdio
@@ -457,11 +474,12 @@ The message is sent differently based on connection type:
                               (insert msg)
                               (buffer-string)))))
             (condition-case-unless-debug err
-                (setq json
-                      (json-parse-string json-str
-                                         :object-type 'plist
-                                         :null-object nil
-                                         :false-object :json-false))
+                (when (stringp json-str)
+                  (setq json
+                        (json-parse-string json-str
+                                           :object-type 'plist
+                                           :null-object nil
+                                           :false-object :json-false)))
               (json-parse-error
                ;; parse error and not because of incomplete json
                (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) json-str))
@@ -542,10 +560,10 @@ The message is sent differently based on connection type:
                                   host
                                   port)
                           "Accept: text/event-stream\r\n"
-                          (if (mcp--sse conn)
-                              ""
-                            (format "Mcp-Session-Id: %s\r\n"
-                                    (mcp--session-id conn)))
+                          (when-let* ((token (mcp--resolve-value (mcp--token conn))))
+                            (format "Authorization: Bearer %s\r\n" token))
+                          (unless (mcp--sse conn)
+                            (format "Mcp-Session-Id: %s\r\n" (mcp--session-id conn)))
                           "Cache-Control: no-cache\r\n"
                           "Connection: keep-alive\r\n\r\n"))))
 
@@ -690,8 +708,8 @@ mcp server before sending."
     (not (member (mcp--status conn) '(stop error)))))
 
 ;;;###autoload
-(cl-defun mcp-connect-server (name &key command args url env initial-callback
-                                   tools-callback prompts-callback
+(cl-defun mcp-connect-server (name &key command args url env token
+                                   initial-callback tools-callback prompts-callback
                                    resources-callback resources-templates-callback
                                    error-callback)
   "Connect to an MCP server with NAME, COMMAND, and ARGS or URL.
@@ -716,7 +734,7 @@ resources-templates provided by the server.
 ERROR-CALLBACK is a function to call on error.
 
 This function creates a new process for the server, initializes a connection,
-and sends an initialization message to the server. The connection is stored
+and sends an initialization message to the server.  The connection is stored
 in the `mcp-server-connections` hash table for future reference."
   (unless (mcp--server-running-p name)
     (when-let* ((server-config (cond (command
@@ -725,8 +743,8 @@ in the `mcp-server-connections` hash table for future reference."
                                             :args args))
                                      (url
                                       (when-let* ((res (mcp--parse-http-url url)))
-                                        (plist-put res
-                                                   :connection-type 'http)))))
+                                        (plist-put res :connection-type 'http)
+                                        (plist-put res :token token)))))
                 (connection-type (plist-get server-config :connection-type))
                 (buffer-name (format "*Mcp %s server*" name))
                 (process-name (format "mcp-%s-server" name))
@@ -780,7 +798,8 @@ in the `mcp-server-connections` hash table for future reference."
                                      (list :host (plist-get server-config :host)
                                            :port (plist-get server-config :port)
                                            :tls (plist-get server-config :tls)
-                                           :path (plist-get server-config :path)))))))
+                                           :path (plist-get server-config :path)
+                                           :token (plist-get server-config :token)))))))
         ;; Initialize connection
         (puthash name connection mcp-server-connections)
         ;; Send the Initialize message
