@@ -350,7 +350,8 @@ The message is sent differently based on connection type:
                       (plist-get (process-put
                                   proc 'jsonrpc-pending
                                   (generate-new-buffer
-                                   (format " *mcp-%s-jsonrpc-pending*" (jsonrpc-name conn))))
+                                   (format " *mcp-%s-jsonrpc-pending*" (jsonrpc-name conn))
+                                   'inhibit-hooks))
                                  'jsonrpc-pending)))
              (message-rest-size (or (process-get proc 'jsonrpc-message-rest-size)
                                     0))
