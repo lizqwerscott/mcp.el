@@ -253,7 +253,9 @@ The message is sent differently based on connection type:
                      (id 'request)
                      (method 'notification)))
          (converted (jsonrpc-convert-to-endpoint connection args kind))
-         (json (jsonrpc--json-encode converted)))
+         (json (json-serialize converted
+                               :false-object :json-false
+                               :null-object :json-null)))
     (pcase (mcp--connection-type connection)
       ('http
        (let ((url-request-method "POST")
@@ -376,7 +378,7 @@ The message is sent differently based on connection type:
                  (if (string-prefix-p "HTTP" data-block)
                      (if-let* ((headers (mcp--parse-http-header data-block))
                                (response-code (plist-get headers :response-code))
-                               (content-type (plist-get headers :content-type)))
+                               (content-type (or (plist-get headers :content-type) "")))
                          (when (or (not (string= response-code "200"))
                                    (not (string-match "text/event-stream" content-type)))
                            ;; sse not connect success
@@ -986,9 +988,9 @@ This function sends an `initialize' request to the server
 with the client's capabilities and version information."
   (jsonrpc-async-request connection
                          :initialize
-                         (list :protocolVersion (car mcp--support-versions)
-                               :capabilities '(:roots (:listChanged t))
-                               :clientInfo '(:name "mcp-emacs" :version "0.1.0"))
+                         `( :protocolVersion ,(car mcp--support-versions)
+                            :capabilities (:roots (:listChanged t))
+                            :clientInfo (:name "mcp-emacs" :version "0.1.0"))
                          :success-fn
                          (lambda (res)
                            (cl-destructuring-bind (&key protocolVersion serverInfo capabilities &allow-other-keys) res
@@ -1019,8 +1021,7 @@ ERROR-CALLBACK is an optional function to call if the request fails.
 This function sends a request to the server to list available tools.
 The result is stored in the `mcp--tools' slot of the CONNECTION object."
   (jsonrpc-async-request connection
-                         :tools/list
-                         '(:cursor "")
+                         :tools/list nil
                          :success-fn
                          (lambda (res)
                            (cl-destructuring-bind (&key tools &allow-other-keys) res
@@ -1079,8 +1080,7 @@ error code and message.
 
 The result is stored in the `mcp--prompts' slot of the CONNECTION object."
   (jsonrpc-async-request connection
-                         :prompts/list
-                         '(:cursor "")
+                         :prompts/list nil
                          :success-fn
                          (lambda (res)
                            (cl-destructuring-bind (&key prompts &allow-other-keys) res
@@ -1138,8 +1138,7 @@ function to call if an error occurs during the request.
 
 The result is stored in the `mcp--resources' slot of the CONNECTION object."
   (jsonrpc-async-request connection
-                         :resources/list
-                         '(:cursor "")
+                         :resources/list nil
                          :success-fn
                          (lambda (res)
                            (cl-destructuring-bind (&key resources &allow-other-keys) res
@@ -1190,8 +1189,7 @@ CONNECTION is the MCP connection object. CALLBACK is an optional function to
 call upon successful retrieval of resources. ERROR-CALLBACK is an optional
 function to call if an error occurs during the request."
   (jsonrpc-async-request connection
-                         :resources/templates/list
-                         '(:cursor "")
+                         :resources/templates/list nil
                          :success-fn
                          (lambda (res)
                            (cl-destructuring-bind (&key resourceTemplates &allow-other-keys) res
