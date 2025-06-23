@@ -1036,7 +1036,7 @@ ERROR-CALLBACK is a function to call on error."
 
 (defun mcp-async-list-tools (connection &optional callback error-callback)
   "Get a list of tools from the MCP server using the provided CONNECTION."
-  (mcp--async-list connection :tools/list 'mcp--tools callback error-callback))
+  (mcp--async-list connection :tools/list '-tools callback error-callback))
 
 (defun mcp-call-tool (connection name arguments)
   "Call a tool on the remote CONNECTION with NAME and ARGUMENTS.
@@ -1074,7 +1074,7 @@ ERROR-CALLBACK is a function to call on error."
 
 (defun mcp-async-list-prompts (connection &optional callback error-callback)
   "Get list of prompts from the MCP server using the provided CONNECTION."
-  (mcp--async-list connection :prompts/list 'mcp--prompts callback error-callback))
+  (mcp--async-list connection :prompts/list '-tools callback error-callback))
 
 (defun mcp-get-prompt (connection name arguments)
   "Call a prompt on the remote CONNECTION with NAME and ARGUMENTS.
@@ -1112,7 +1112,8 @@ ERROR-CALLBACK is a function to call on error."
 
 (defun mcp-async-list-resources (connection &optional callback error-callback)
   "Get list of resources from the MCP server using the provided CONNECTION."
-  (mcp--async-list connection :resources/list 'mcp--resources callback error-callback))
+  (mcp--async-list connection :resources/list '-tools callback error-callback))
+
 (defun mcp-read-resource (connection uri)
   "Call a resource on the remote CONNECTION with URI.
 
