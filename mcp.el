@@ -1011,20 +1011,21 @@ with the client's capabilities and version information."
                                            (message "Sadly, mcp server (%s) timed out"
                                                     (jsonrpc-name connection)))))))
 
-(defun mcp--async-list (connection method slot callback error-callback)
+(defun mcp--async-list (connection method key-name slot-name callback error-callback)
   "Helper function to asynchronously list items from the MCP server.
 
 CONNECTION is the MCP connection object.
 METHOD is the JSON-RPC method to call (e.g., :tools/list).
-SLOT is the connection slot to store results (e.g., mcp--tools).
+KEY-NAME is the connection slot to store results (e.g., :tools).
+SLOT-NAME is the connection slot to store results (e.g., -tools).
 CALLBACK is a function to call with the result.
 ERROR-CALLBACK is a function to call on error."
   (jsonrpc-async-request connection
                          method nil
                          :success-fn
                          (lambda (res)
-                           (cl-destructuring-bind (&key items &allow-other-keys) res
-                             (setf (slot-value connection slot) items)
+                           (when-let* ((items (plist-get res key-name)))
+                             (setf (slot-value connection slot-name) items)
                              (when callback
                                (funcall callback connection items))))
                          :error-fn
@@ -1036,7 +1037,7 @@ ERROR-CALLBACK is a function to call on error."
 
 (defun mcp-async-list-tools (connection &optional callback error-callback)
   "Get a list of tools from the MCP server using the provided CONNECTION."
-  (mcp--async-list connection :tools/list '-tools callback error-callback))
+  (mcp--async-list connection :tools/list :tools '-tools callback error-callback))
 
 (defun mcp-call-tool (connection name arguments)
   "Call a tool on the remote CONNECTION with NAME and ARGUMENTS.
@@ -1074,7 +1075,7 @@ ERROR-CALLBACK is a function to call on error."
 
 (defun mcp-async-list-prompts (connection &optional callback error-callback)
   "Get list of prompts from the MCP server using the provided CONNECTION."
-  (mcp--async-list connection :prompts/list '-tools callback error-callback))
+  (mcp--async-list connection :prompts/list :prompts '-prompts callback error-callback))
 
 (defun mcp-get-prompt (connection name arguments)
   "Call a prompt on the remote CONNECTION with NAME and ARGUMENTS.
@@ -1112,7 +1113,7 @@ ERROR-CALLBACK is a function to call on error."
 
 (defun mcp-async-list-resources (connection &optional callback error-callback)
   "Get list of resources from the MCP server using the provided CONNECTION."
-  (mcp--async-list connection :resources/list '-tools callback error-callback))
+  (mcp--async-list connection :resources/list :resources '-resources callback error-callback))
 
 (defun mcp-read-resource (connection uri)
   "Call a resource on the remote CONNECTION with URI.
@@ -1146,7 +1147,7 @@ succeeds, or ERROR-CALLBACK if it fails."
 
 (defun mcp-async-list-resource-templates (connection &optional callback error-callback)
   "Get list of resource templates from the MCP server using the CONNECTION."
-  (mcp--async-list connection :resources/templates/list 'mcp--template-resources callback error-callback))
+  (mcp--async-list connection :resources/templates/list :templateResources '-template-resources callback error-callback))
 
 (provide 'mcp)
 ;;; mcp.el ends here
