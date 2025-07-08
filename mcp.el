@@ -1036,7 +1036,9 @@ ERROR-CALLBACK is a function to call on error."
                                       (jsonrpc-name connection) code message)))))
 
 (defun mcp-async-list-tools (connection &optional callback error-callback)
-  "Get a list of tools from the MCP server using the provided CONNECTION."
+  "Get a list of tools from the MCP server using the provided CONNECTION.
+CALLBACK is a function to call with the result.
+ERROR-CALLBACK is a function to call on error."
   (mcp--async-list connection :tools/list :tools '-tools callback error-callback))
 
 (defun mcp-call-tool (connection name arguments)
@@ -1074,7 +1076,9 @@ ERROR-CALLBACK is a function to call on error."
                            (funcall error-callback code message))))
 
 (defun mcp-async-list-prompts (connection &optional callback error-callback)
-  "Get list of prompts from the MCP server using the provided CONNECTION."
+  "Get list of prompts from the MCP server using the provided CONNECTION.
+CALLBACK is a function to call with the result.
+ERROR-CALLBACK is a function to call on error."
   (mcp--async-list connection :prompts/list :prompts '-prompts callback error-callback))
 
 (defun mcp-get-prompt (connection name arguments)
@@ -1112,7 +1116,9 @@ ERROR-CALLBACK is a function to call on error."
                            (funcall error-callback code message))))
 
 (defun mcp-async-list-resources (connection &optional callback error-callback)
-  "Get list of resources from the MCP server using the provided CONNECTION."
+  "Get list of resources from the MCP server using the provided CONNECTION.
+CALLBACK is a function to call with the result.
+ERROR-CALLBACK is a function to call on error."
   (mcp--async-list connection :resources/list :resources '-resources callback error-callback))
 
 (defun mcp-read-resource (connection uri)
@@ -1146,7 +1152,9 @@ succeeds, or ERROR-CALLBACK if it fails."
                            (funcall error-callback code message))))
 
 (defun mcp-async-list-resource-templates (connection &optional callback error-callback)
-  "Get list of resource templates from the MCP server using the CONNECTION."
+  "Get list of resource templates from the MCP server using the CONNECTION.
+CALLBACK is a function to call with the result.
+ERROR-CALLBACK is a function to call on error."
   (mcp--async-list connection :resources/templates/list :templateResources '-template-resources callback error-callback))
 
 (provide 'mcp)
