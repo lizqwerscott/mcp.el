@@ -71,7 +71,8 @@ Use =mcp-hub= to launch the server management interface, which will automaticall
 | R   | mcp-hub-restart-all-server | Restart all configured servers         |
 | K   | mcp-hub-close-all-server   | Stop all running servers               |
 *** use with [[https://github.com/karthink/gptel][gptel]]
-For =gptel= integration, See the [[https://github.com/karthink/gptel?tab=readme-ov-file#model-context-protocol-mcp-integration][gptel mcp]] for details.
+- For =gptel= integration, See the [[https://github.com/karthink/gptel?tab=readme-ov-file#model-context-protocol-mcp-integration][gptel mcp]] for details.
+- [[https://github.com/lizqwerscott/gptel-mcp.el][gptel-mcp.el]] is interface integration for gptel.el and mcp.el
 ** Example [[https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem][filesystem]] server.
 *** Establish the connection first.
 #+begin_src elisp
