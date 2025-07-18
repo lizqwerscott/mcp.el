@@ -37,7 +37,7 @@ Each server configuration is a list of the form
   :group 'mcp-hub
   :type '(list (cons string (list symbol string))))
 
-(defun mcp-hub--start-server (server &optional inited-callback)
+(defun mcp-hub--start-server (server &optional inited-callback syncp)
   "Start an MCP server with the given configuration.
 SERVER should be a cons cell of the form (NAME . CONFIG) where:
 - NAME is a string identifying the server
@@ -47,30 +47,34 @@ SERVER should be a cons cell of the form (NAME . CONFIG) where:
 
 Optional argument INITED-CALLBACK is a function called when the server
 has successfully initialized and tools are available. The callback
-receives no arguments."
-  (apply #'mcp-connect-server
-         (append (list (car server))
-                 (cdr server)
-                 (list :initial-callback
-                       (lambda (_)
-                         (mcp-hub-update))
-                       :tools-callback
-                       (lambda (_ _)
-                         (mcp-hub-update)
-                         (when inited-callback
-                           (funcall inited-callback)))
-                       :prompts-callback
-                       (lambda (_ _)
-                         (mcp-hub-update))
-                       :resources-callback
-                       (lambda (_ _)
-                         (mcp-hub-update))
-                       :resources-templates-callback
-                       (lambda (_ _)
-                         (mcp-hub-update))
-                       :error-callback
-                       (lambda (_ _)
-                         (mcp-hub-update))))))
+receives no arguments.
+
+Optional argument SYNCP is a boolean and decides if the operation runs
+synchronously (non-nil) or asynchronously (nil)."
+  (let ((connect-fn (if syncp #'mcp-sync-connect-server #'mcp-connect-server)))
+    (apply connect-fn
+           (append (list (car server))
+                   (cdr server)
+                   (list :initial-callback
+                         (lambda (_)
+                           (mcp-hub-update))
+                         :tools-callback
+                         (lambda (_ _)
+                           (mcp-hub-update)
+                           (when inited-callback
+                             (funcall inited-callback)))
+                         :prompts-callback
+                         (lambda (_ _)
+                           (mcp-hub-update))
+                         :resources-callback
+                         (lambda (_ _)
+                           (mcp-hub-update))
+                         :resources-templates-callback
+                         (lambda (_ _)
+                           (mcp-hub-update))
+                         :error-callback
+                         (lambda (_ _)
+                           (mcp-hub-update)))))))
 
 ;;;###autoload
 (cl-defun mcp-hub-get-all-tool (&key asyncp categoryp)
