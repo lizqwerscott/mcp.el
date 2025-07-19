@@ -307,7 +307,8 @@ The message is sent differently based on connection type:
                                      (setf (mcp--session-id connection)
                                            session-id))
                                    ;; connect sse
-                                   (unless (jsonrpc--process connection)
+                                   (when (and (mcp--sse connection)
+                                              (not (jsonrpc--process connection)))
                                      (mcp--connect-sse connection))
                                    (unless (mcp--sse connection)
                                      (let (data json)
