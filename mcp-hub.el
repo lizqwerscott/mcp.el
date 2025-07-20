@@ -51,30 +51,30 @@ receives no arguments.
 
 Optional argument SYNCP is a boolean and decides if the operation runs
 synchronously (non-nil) or asynchronously (nil)."
-  (let ((connect-fn (if syncp #'mcp-sync-connect-server #'mcp-connect-server)))
-    (apply connect-fn
-           (append (list (car server))
-                   (cdr server)
-                   (list :initial-callback
-                         (lambda (_)
-                           (mcp-hub-update))
-                         :tools-callback
-                         (lambda (_ _)
-                           (mcp-hub-update)
-                           (when inited-callback
-                             (funcall inited-callback)))
-                         :prompts-callback
-                         (lambda (_ _)
-                           (mcp-hub-update))
-                         :resources-callback
-                         (lambda (_ _)
-                           (mcp-hub-update))
-                         :resources-templates-callback
-                         (lambda (_ _)
-                           (mcp-hub-update))
-                         :error-callback
-                         (lambda (_ _)
-                           (mcp-hub-update)))))))
+  (apply #'mcp-connect-server
+         (append (list (car server))
+                 (cdr server)
+                 (list :initial-callback
+                       (lambda (_)
+                         (mcp-hub-update))
+                       :tools-callback
+                       (lambda (_ _)
+                         (mcp-hub-update)
+                         (when inited-callback
+                           (funcall inited-callback)))
+                       :prompts-callback
+                       (lambda (_ _)
+                         (mcp-hub-update))
+                       :resources-callback
+                       (lambda (_ _)
+                         (mcp-hub-update))
+                       :resources-templates-callback
+                       (lambda (_ _)
+                         (mcp-hub-update))
+                       :error-callback
+                       (lambda (_ _)
+                         (mcp-hub-update))
+                       :syncp syncp))))
 
 ;;;###autoload
 (cl-defun mcp-hub-get-all-tool (&key asyncp categoryp)
@@ -115,7 +115,7 @@ Example:
     (nreverse res)))
 
 ;;;###autoload
-(defun mcp-hub-start-all-server (&optional callback servers)
+(defun mcp-hub-start-all-server (&optional callback servers syncp)
   "Start all configured MCP servers.
 This function will attempt to start each server listed in `mcp-hub-servers'
 if it's not already running.
@@ -125,7 +125,10 @@ either started successfully or failed to start.The callback receives no
 arguments.
 
 Optional argument SERVERS is a list of server names (strings) to filter which
-servers should be started. When nil, all configured servers are considered."
+servers should be started. When nil, all configured servers are considered.
+
+Optional argument SYNCP is a boolean. When non-nil, the servers are
+started synchronously."
   (interactive)
   (let* ((servers-to-start (cl-remove-if (lambda (server)
                                            (or (and servers
@@ -147,7 +150,8 @@ servers should be started. When nil, all configured servers are considered."
                (cl-incf started)
                (message "Started server %s (%d/%d)" (car server) started total)
                (when (and callback (>= started total))
-                 (funcall callback))))
+                 (funcall callback)))
+             syncp)
           (error
            (message "Failed to start server %s: %s" (car server) err)
            (cl-incf started)
