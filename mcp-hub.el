@@ -193,7 +193,7 @@ Returns a list of server statuses, where each status is a plist containing:
                 (list :name name :status 'stop))))
           mcp-hub-servers))
 
-(defun mcp-hub-update ()
+(defun mcp-hub-update (&optional ignore-auto noconfirm)
   "Update the MCP Hub display with current server status.
 If called interactively, ARG is the prefix argument.
 When SILENT is non-nil, suppress any status messages.
@@ -241,6 +241,7 @@ prompts."
 Start all server if START is non-nil or if called interactively with a prefix
 argument."
   (interactive "P")
+  (hack-dir-local-variables-non-file-buffer) ; ensure dir-locals before using mcp-hub-servers
   ;; start all server
   (when (and start
              mcp-hub-servers
