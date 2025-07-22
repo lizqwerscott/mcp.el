@@ -37,6 +37,11 @@ Each server configuration is a list of the form
   :group 'mcp-hub
   :type '(list (cons string (list symbol string))))
 
+(defcustom mcp-hub-buffer-name "*Mcp-Hub*"
+  "Buffer name for mcp-hub."
+  :group 'mcp-hub
+  :type 'string)
+
 (defun mcp-hub--start-server (server &optional inited-callback)
   "Start an MCP server with the given configuration.
 SERVER should be a cons cell of the form (NAME . CONFIG) where:
@@ -180,26 +185,27 @@ Returns a list of server statuses, where each status is a plist containing:
 - :resources - Available resources (if connected)
 - :template-resources - Available template resources (if connected)
 - :prompts - Available prompts (if connected)"
-  (mapcar (lambda (server)
-            (let ((name (car server)))
-              (if-let* ((connection (gethash name mcp-server-connections)))
-                  (list :name name
-                        :type (mcp--connection-type connection)
-                        :status (mcp--status connection)
-                        :tools (mcp--tools connection)
-                        :resources (mcp--resources connection)
-                        :template-resources (mcp--template-resources connection)
-                        :prompts (mcp--prompts connection))
-                (list :name name :status 'stop))))
-          mcp-hub-servers))
+  ;; happens also on process sentinels, mcp-hub-servers needs to be local
+  (with-current-buffer (get-buffer-create mcp-hub-buffer-name)
+    (mapcar (lambda (server)
+              (let ((name (car server)))
+                (if-let* ((connection (gethash name mcp-server-connections)))
+                    (list :name name
+                          :type (mcp--connection-type connection)
+                          :status (mcp--status connection)
+                          :tools (mcp--tools connection)
+                          :resources (mcp--resources connection)
+                          :template-resources (mcp--template-resources connection)
+                          :prompts (mcp--prompts connection))
+                  (list :name name :status 'stop))))
+            mcp-hub-servers)))
 
 (defun mcp-hub-update (&optional ignore-auto noconfirm)
   "Update the MCP Hub display with current server status.
-If called interactively, ARG is the prefix argument.
-When SILENT is non-nil, suppress any status messages.
-This function refreshes the *Mcp-Hub* buffer with the latest server information,
-including connection status, available tools, resources, template resources and
-prompts."
+If called interactively, ARG is the prefix argument. When SILENT is non-nil,
+suppress any status messages. This function refreshes the `mcp-hub-buffer-name'
+buffer with the latest server information, including connection status,
+available tools, resources, template resources and prompts."
   (interactive)
   (ignore ignore-auto noconfirm) ; unused variables
   (when-let* ((server-list (mcp-hub-get-servers))
@@ -227,7 +233,7 @@ prompts."
                                                                  (plist-get server :prompts)))
                                                  (list "nil" "nil" "nil" "nil")))))
                                    server-list)))
-    (with-current-buffer (get-buffer-create "*Mcp-Hub*")
+    (with-current-buffer (get-buffer-create mcp-hub-buffer-name)
       (setq tabulated-list-entries
             (cl-mapcar (lambda (statu index)
                          (list (format "%d" index)
@@ -242,23 +248,26 @@ prompts."
 Start all server if START is non-nil or if called interactively with a prefix
 argument."
   (interactive "P")
-  (hack-dir-local-variables-non-file-buffer) ; ensure dir-locals before using mcp-hub-servers
-  ;; start all server
-  (when (and start
-             mcp-hub-servers
-             (= (hash-table-count mcp-server-connections)
-                0))
-    (mcp-hub-start-all-server))
-  ;; show buffer
-  (pop-to-buffer "*Mcp-Hub*" nil)
-  (mcp-hub-mode))
+  (let* ((buffer (get-buffer-create mcp-hub-buffer-name)))
+    (with-current-buffer buffer
+      (mcp-hub-mode)
+      ;; start all servers
+      (when (and start
+                 mcp-hub-servers
+                 (= (hash-table-count mcp-server-connections)
+                    0))
+        (mcp-hub-start-all-server))
+      (mcp-hub-update))
+    ;; show buffer
+    (pop-to-buffer buffer nil)))
 
 ;;;###autoload
 (defun mcp-hub-start-server ()
   "Start the currently selected MCP server.
-This function starts the server that is currently highlighted in the *Mcp-Hub*
-buffer. It sets up callbacks for connection status, tools, prompts, and
-resources updates, and refreshes the hub view after starting the server."
+This function starts the server that is currently highlighted in the
+`mcp-hub-buffer-name' buffer. It sets up callbacks for connection status, tools,
+prompts, and resources updates, and refreshes the hub view after starting the
+server."
   (interactive)
   (when-let* ((server (tabulated-list-get-entry))
               (name (elt server 0))
@@ -269,8 +278,9 @@ resources updates, and refreshes the hub view after starting the server."
 ;;;###autoload
 (defun mcp-hub-close-server ()
   "Stop the currently selected MCP server.
-This function stops the server that is currently highlighted in the *Mcp-Hub*
-buffer and updates the hub view to reflect the change in status."
+This function stops the server that is currently highlighted in the
+`mcp-hub-buffer-name' buffer and updates the hub view to reflect the change in
+status."
   (interactive)
   (when-let* ((server (tabulated-list-get-entry))
               (name (elt server 0)))
@@ -280,9 +290,9 @@ buffer and updates the hub view to reflect the change in status."
 ;;;###autoload
 (defun mcp-hub-restart-server ()
   "Restart the currently selected MCP server.
-This function stops and then starts the server that is currently highlighted
-in the *Mcp-Hub* buffer. It's useful for applying configuration changes or
-recovering from errors."
+This function stops and then starts the server that is currently highlighted in
+the `mcp-hub-buffer-name' buffer. It's useful for applying configuration changes
+or recovering from errors."
   (interactive)
   (mcp-hub-close-server)
   (mcp-hub-start-server))
@@ -291,7 +301,7 @@ recovering from errors."
 (defun mcp-hub-view-log ()
   "View the event log for the currently selected MCP server.
 This function opens a buffer showing the event log for the server that is
-currently highlighted in the *Mcp-Hub* buffer."
+currently highlighted in the `mcp-hub-buffer-name' buffer."
   (interactive)
   (when-let* ((server (tabulated-list-get-entry))
               (name (elt server 0)))
@@ -321,6 +331,7 @@ currently highlighted in the *Mcp-Hub* buffer."
   (keymap-set mcp-hub-mode-map "R" #'mcp-hub-restart-all-server)
   (keymap-set mcp-hub-mode-map "K" #'mcp-hub-close-all-server)
 
+  (hack-dir-local-variables-non-file-buffer)
   (mcp-hub-update))
 
 (provide 'mcp-hub)
