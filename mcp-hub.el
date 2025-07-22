@@ -201,6 +201,7 @@ This function refreshes the *Mcp-Hub* buffer with the latest server information,
 including connection status, available tools, resources, template resources and
 prompts."
   (interactive)
+  (ignore ignore-aut noconfirm) ; unused variables
   (when-let* ((server-list (mcp-hub-get-servers))
               (server-show (mapcar (lambda (server)
                                      (let* ((name (plist-get server :name))
