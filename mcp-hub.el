@@ -201,7 +201,7 @@ Returns a list of server statuses, where each status is a plist containing:
                 (list :name name :status 'stop))))
           mcp-hub-servers))
 
-(defun mcp-hub-update ()
+(defun mcp-hub-update (&optional ignore-auto noconfirm)
   "Update the MCP Hub display with current server status.
 If called interactively, ARG is the prefix argument.
 When SILENT is non-nil, suppress any status messages.
@@ -209,6 +209,7 @@ This function refreshes the *Mcp-Hub* buffer with the latest server information,
 including connection status, available tools, resources, template resources and
 prompts."
   (interactive)
+  (ignore ignore-auto noconfirm) ; unused variables
   (when-let* ((server-list (mcp-hub-get-servers))
               (server-show (mapcar (lambda (server)
                                      (let* ((name (plist-get server :name))
