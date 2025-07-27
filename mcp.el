@@ -671,8 +671,7 @@ SYNCP specifies if the operation should be synchronous or asynchronous."
                                     (run-with-idle-timer mcp-server-wait-initial-time
                                                          nil
                                                          capability-handlers)
-                                  ;; REVIEW 2025-07-17: `sleep-for' or `sit-for'?
-                                  (sleep-for mcp-server-wait-initial-time)
+                                  (sit-for mcp-server-wait-initial-time)
                                   ;; REVIEW 2025-07-17: This needs to happen here,
                                   ;;   because the following callbacks might rely
                                   ;;   on the connection status.
@@ -812,8 +811,7 @@ in the `mcp-server-connections` hash table for future reference."
                             (message "Sadly, %s mcp server process start error" name))))))
           (if (not syncp)
               (run-with-idle-timer 1 nil msg-fn)
-            ;; REVIEW 2025-07-17: `sleep-for' or `sit-for'?
-            (sleep-for 1)
+            (sit-for 1)
             (funcall msg-fn)))))))
 
 ;;;###autoload
