@@ -159,7 +159,10 @@ Available levels:
     :accessor mcp--session-id)
    (-running
     :initform t
-    :accessor mcp--running))
+    :accessor mcp--running)
+   (-transport-mode
+    :initform nil
+    :accessor mcp--transport-mode))
   :documentation "A sse MCP connection over an Emacs process.")
 
 (defclass mcp-stdio-process-connection (mcp-process-connection)
@@ -285,18 +288,41 @@ The message is sent differently based on connection type:
                                         (headers-plist (mcp--parse-http-header headers))
                                         (session-id (plist-get headers-plist :mcp-session-id))
                                         (response-code (plist-get headers-plist :response-code)))
-                                   (when (string= "4"
-                                                  (substring response-code 0 1))
-                                     (setf (mcp--sse connection) t))
                                    (when session-id
                                      (setf (mcp--session-id connection)
                                            session-id))
-                                   ;; connect sse
-                                   (unless (jsonrpc--process connection)
-                                     (mcp--connect-sse connection))
+                                   ;; Per MCP spec: only try SSE if initialize request failed with 4xx
+                                   (when (and (string= "4" (substring response-code 0 1))
+                                              (or (eq method :initialize)
+                                                  (string= (format "%s" method) "initialize"))
+                                              (not (mcp--transport-mode connection)))
+                                     (setf (mcp--sse connection) t)
+                                     (setf (mcp--transport-mode connection) 'http-sse)
+                                     ;; connect sse for http-sse transport
+                                     (unless (jsonrpc--process connection)
+                                       (mcp--connect-sse connection)))
+                                   ;; For successful responses to initialize, use http-streamable transport
+                                   (when (and (string= "2" (substring response-code 0 1))
+                                              (or (eq method :initialize)
+                                                  (string= (format "%s" method) "initialize"))
+                                              (not (mcp--transport-mode connection)))
+                                     (setf (mcp--transport-mode connection) 'http-streamable))
                                    (unless (mcp--sse connection)
                                      (when-let* ((content-type (plist-get headers-plist :content-type)))
-                                       (when (string= content-type "text/event-stream")
+                                       (cond
+                                        ;; Handle JSON responses (http-streamable transport)
+                                        ((string-match "application/json" content-type)
+                                         (condition-case-unless-debug err
+                                             (let ((json (json-parse-string body
+                                                                            :object-type 'plist
+                                                                            :null-object nil
+                                                                            :false-object :json-false)))
+                                               (when json
+                                                 (jsonrpc-connection-receive connection json)))
+                                           (json-parse-error
+                                            (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) body))))
+                                        ;; Handle SSE responses (http-sse transport)
+                                        ((string= content-type "text/event-stream")
                                          (let ((data)
                                                (json))
                                            (dolist (line (split-string body "\n"))
@@ -312,7 +338,7 @@ The message is sent differently based on connection type:
                                               ;; parse error and not because of incomplete json
                                               (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
                                            (when json
-                                             (jsonrpc-connection-receive connection json))))))))
+                                             (jsonrpc-connection-receive connection json)))))))))
                                (kill-buffer))))
            (set (make-local-variable 'url-mime-accept-string) url-mime-accept-string))))
       ('stdio
@@ -788,7 +814,7 @@ in the `mcp-server-connections` hash table for future reference."
                              nil
                              (lambda ()
                                (condition-case-unless-debug err
-                                   (if (jsonrpc-running-p connection)
+                                   (if (or (eq connection-type 'http) (jsonrpc-running-p connection))
                                        (when (or (equal connection-type 'stdio)
                                                  (equal connection-type 'http))
                                          (mcp--send-initial-message connection t))
