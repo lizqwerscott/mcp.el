@@ -285,18 +285,28 @@ The message is sent differently based on connection type:
                                         (headers-plist (mcp--parse-http-header headers))
                                         (session-id (plist-get headers-plist :mcp-session-id))
                                         (response-code (plist-get headers-plist :response-code)))
-                                   (when (string= "4"
-                                                  (substring response-code 0 1))
-                                     (setf (mcp--sse connection) t))
                                    (when session-id
                                      (setf (mcp--session-id connection)
                                            session-id))
-                                   ;; connect sse
+                                   ;; Establish optional GET-based SSE channel for server notifications
                                    (unless (jsonrpc--process connection)
                                      (mcp--connect-sse connection))
                                    (unless (mcp--sse connection)
                                      (when-let* ((content-type (plist-get headers-plist :content-type)))
-                                       (when (string= content-type "text/event-stream")
+                                       (cond
+                                        ;; Handle JSON responses - per MCP spec, always support application/json
+                                        ((string-match "application/json" content-type)
+                                         (condition-case-unless-debug err
+                                             (let ((json (json-parse-string body
+                                                                            :object-type 'plist
+                                                                            :null-object nil
+                                                                            :false-object :json-false)))
+                                               (when json
+                                                 (jsonrpc-connection-receive connection json)))
+                                           (json-parse-error
+                                            (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) body))))
+                                        ;; Handle SSE responses - per MCP spec, always support text/event-stream
+                                        ((string= content-type "text/event-stream")
                                          (let ((data)
                                                (json))
                                            (dolist (line (split-string body "\n"))
@@ -312,7 +322,7 @@ The message is sent differently based on connection type:
                                               ;; parse error and not because of incomplete json
                                               (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
                                            (when json
-                                             (jsonrpc-connection-receive connection json))))))))
+                                             (jsonrpc-connection-receive connection json)))))))))
                                (kill-buffer))))
            (set (make-local-variable 'url-mime-accept-string) url-mime-accept-string))))
       ('stdio
@@ -788,7 +798,7 @@ in the `mcp-server-connections` hash table for future reference."
                              nil
                              (lambda ()
                                (condition-case-unless-debug err
-                                   (if (jsonrpc-running-p connection)
+                                   (if (or (eq connection-type 'http) (jsonrpc-running-p connection))
                                        (when (or (equal connection-type 'stdio)
                                                  (equal connection-type 'http))
                                          (mcp--send-initial-message connection t))
