@@ -288,6 +288,9 @@ The message is sent differently based on connection type:
                                    (when session-id
                                      (setf (mcp--session-id connection)
                                            session-id))
+                                   ;; Establish optional GET-based SSE channel for server notifications
+                                   (unless (jsonrpc--process connection)
+                                     (mcp--connect-sse connection))
                                    (unless (mcp--sse connection)
                                      (when-let* ((content-type (plist-get headers-plist :content-type)))
                                        (cond
