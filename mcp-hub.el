@@ -37,7 +37,7 @@ Each server configuration is a list of the form
   :group 'mcp-hub
   :type '(list (cons string (list symbol string))))
 
-(defun mcp-hub--start-server (server &optional inited-callback)
+(defun mcp-hub--start-server (server &optional inited-callback syncp)
   "Start an MCP server with the given configuration.
 SERVER should be a cons cell of the form (NAME . CONFIG) where:
 - NAME is a string identifying the server
@@ -47,7 +47,10 @@ SERVER should be a cons cell of the form (NAME . CONFIG) where:
 
 Optional argument INITED-CALLBACK is a function called when the server
 has successfully initialized and tools are available. The callback
-receives no arguments."
+receives no arguments.
+
+Optional argument SYNCP is a boolean and decides if the operation runs
+synchronously (non-nil) or asynchronously (nil)."
   (apply #'mcp-connect-server
          (append (list (car server))
                  (cdr server)
@@ -70,7 +73,8 @@ receives no arguments."
                          (mcp-hub-update))
                        :error-callback
                        (lambda (_ _)
-                         (mcp-hub-update))))))
+                         (mcp-hub-update))
+                       :syncp syncp))))
 
 ;;;###autoload
 (cl-defun mcp-hub-get-all-tool (&key asyncp categoryp)
@@ -111,7 +115,7 @@ Example:
     (nreverse res)))
 
 ;;;###autoload
-(defun mcp-hub-start-all-server (&optional callback servers)
+(defun mcp-hub-start-all-server (&optional callback servers syncp)
   "Start all configured MCP servers.
 This function will attempt to start each server listed in `mcp-hub-servers'
 if it's not already running.
@@ -121,7 +125,10 @@ either started successfully or failed to start.The callback receives no
 arguments.
 
 Optional argument SERVERS is a list of server names (strings) to filter which
-servers should be started. When nil, all configured servers are considered."
+servers should be started. When nil, all configured servers are considered.
+
+Optional argument SYNCP is a boolean. When non-nil, the servers are
+started synchronously."
   (interactive)
   (let* ((servers-to-start (cl-remove-if (lambda (server)
                                            (or (and servers
@@ -143,7 +150,8 @@ servers should be started. When nil, all configured servers are considered."
                (cl-incf started)
                (message "Started server %s (%d/%d)" (car server) started total)
                (when (and callback (>= started total))
-                 (funcall callback))))
+                 (funcall callback)))
+             syncp)
           (error
            (message "Failed to start server %s: %s" (car server) err)
            (cl-incf started)
