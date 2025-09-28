@@ -151,6 +151,10 @@ Available levels:
    (-token
     :initarg :token
     :accessor mcp--token)
+   (-headers
+    :initarg :headers
+    :initform nil
+    :accessor mcp--headers)
    (-sse
     :initform nil
     :accessor mcp--sse)
@@ -277,7 +281,9 @@ The message is sent differently based on connection type:
                 ,@(when-let* ((session-id (mcp--session-id connection)))
                     `(("Mcp-Session-Id" . ,session-id)))
                 ,@(when-let* ((token (mcp--resolve-value (mcp--token connection))))
-                    `(("Authorization" . ,(concat "Bearer " token))))))
+                    `(("Authorization" . ,(concat "Bearer " token))))
+                ,@(when-let* ((headers (mcp--headers connection)))
+                    `,headers)))
              (url-request-data (encode-coding-string
                                 json
                                 'utf-8))
@@ -720,7 +726,7 @@ SYNCP specifies if the operation should be synchronous or asynchronous."
     (not (member (mcp--status conn) '(stop error)))))
 
 ;;;###autoload
-(cl-defun mcp-connect-server (name &key command args url env token
+(cl-defun mcp-connect-server (name &key command args url env token headers
                                    initial-callback tools-callback prompts-callback
                                    resources-callback resources-templates-callback
                                    error-callback syncp)
@@ -757,7 +763,8 @@ in the `mcp-server-connections` hash table for future reference."
                                      (url
                                       (when-let* ((res (mcp--parse-http-url url)))
                                         (plist-put res :connection-type 'http)
-                                        (plist-put res :token token)))))
+                                        (plist-put res :token token)
+                                        (plist-put res :headers headers)))))
                 (connection-type (plist-get server-config :connection-type))
                 (buffer-name (format "*Mcp %s server*" name))
                 (process-name (format "mcp-%s-server" name))
@@ -812,7 +819,8 @@ in the `mcp-server-connections` hash table for future reference."
                                            :port (plist-get server-config :port)
                                            :tls (plist-get server-config :tls)
                                            :path (plist-get server-config :path)
-                                           :token (plist-get server-config :token)))))))
+                                           :token (plist-get server-config :token)
+                                           :headers (plist-get server-config :headers)))))))
         ;; Initialize connection
         (puthash name connection mcp-server-connections)
         ;; Send the Initialize message
