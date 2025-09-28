@@ -483,7 +483,7 @@ The message is sent differently based on connection type:
             (condition-case-unless-debug err
                 (when (stringp json-str)
                   (setq json
-                        (json-parse-string json-str
+                        (json-parse-string (decode-coding-string json-str 'utf-8)
                                            :object-type 'plist
                                            :null-object nil
                                            :false-object :json-false)))
