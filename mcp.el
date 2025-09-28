@@ -739,6 +739,12 @@ ARGS is a list of arguments to pass to the COMMAND.
 URL is a string arguments to connect sse mcp server.
 ENV is a plist argument to set mcp server env.
 
+TOKEN is a string.
+Authentication token used when connecting to an HTTP MCP server.
+
+HEADERS is a alist.
+Additional HTTP headers to include when connecting via URL.
+
 INITIAL-CALLBACK is a function called when the server completes
 the connection.
 TOOLS-CALLBACK is a function called to handle the list of tools
