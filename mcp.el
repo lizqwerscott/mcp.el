@@ -402,7 +402,7 @@ The message is sent differently based on connection type:
                  (if (string-prefix-p "HTTP" data-block)
                      (if-let* ((headers (mcp--parse-http-header data-block))
                                (response-code (plist-get headers :response-code))
-                               (content-type (or (plist-get headers :content-type) "")))
+                               (content-type (or (car (split-string (plist-get headers :content-type) ";" t)) "")))
                          (when (or (not (string= response-code "200"))
                                    (not (string-match "text/event-stream" content-type)))
                            ;; sse not connect success
