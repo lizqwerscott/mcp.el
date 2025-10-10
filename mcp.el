@@ -318,7 +318,7 @@ The message is sent differently based on connection type:
                                      (mcp--connect-sse connection))
                                    (unless (mcp--sse connection)
                                      (let (data json)
-                                       (pcase (plist-get headers-plist :content-type)
+                                       (pcase (car (split-string (plist-get headers-plist :content-type) ";" t))
                                          ("text/event-stream"
                                           (dolist (line (split-string body "\n"))
                                             (cond
