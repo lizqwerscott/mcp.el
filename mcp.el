@@ -132,7 +132,11 @@ Available levels:
     :accessor mcp--resources-templates-callback)
    (-error-callback
     :initarg :error-callback
-    :accessor mcp--error-callback))
+    :accessor mcp--error-callback)
+   (-roots
+    :initarg :roots
+    :initform nil
+    :accessor mcp--roots))
   :documentation "A MCP connection over an Emacs process.")
 
 (defclass mcp-http-process-connection (mcp-process-connection)
@@ -597,7 +601,23 @@ method name. PARAMS contains the method parameters.
 
 This basic implementation just logs the request. Applications
 should override this to implement actual request handling."
-  (message "%s Received request: method=%s, params=%s" name method params))
+  (pcase method
+    ('roots/list
+     (if-let* ((connection (gethash name mcp-server-connections)))
+         (let ((roots (condition-case nil
+                          (mcp--roots connection)
+                        (error nil))))
+           (list :roots (if roots
+                            (vconcat (mapcar (lambda (root)
+                                               (if (stringp root)
+                                                   (list :uri (concat "file://" (expand-file-name root))
+                                                         :name (file-name-nondirectory (directory-file-name root)))
+                                                 root))
+                                             roots))
+                          [])))
+       (list :roots [])))
+    (_
+     (message "%s Received request: method=%s, params=%s" name method params))))
 
 (defun mcp-notification-dispatcher (connection name method params)
   "Handle notifications from MCP server.
@@ -726,7 +746,7 @@ SYNCP specifies if the operation should be synchronous or asynchronous."
     (not (member (mcp--status conn) '(stop error)))))
 
 ;;;###autoload
-(cl-defun mcp-connect-server (name &key command args url env token headers
+(cl-defun mcp-connect-server (name &key command args url env token headers roots
                                    initial-callback tools-callback prompts-callback
                                    resources-callback resources-templates-callback
                                    error-callback syncp)
@@ -744,6 +764,13 @@ Authentication token used when connecting to an HTTP MCP server.
 
 HEADERS is a alist.
 Additional HTTP headers to include when connecting via URL.
+
+ROOTS is a list of directory paths or root specifications.
+Each root can be either:
+- A string path (e.g., \"/home/user/project\")
+- A plist with :uri and :name
+  (e.g., (:uri \"file:///home/user/project\" :name \"Project\"))
+Roots define filesystem boundaries that the server can access.
 
 INITIAL-CALLBACK is a function called when the server completes
 the connection.
@@ -798,35 +825,36 @@ in the `mcp-server-connections` hash table for future reference."
                                         (format "*%s stderr*" name))
                                ;; :file-handler t
                                ))))))
-      (let ((connection (apply #'make-instance
-                               `(,(pcase connection-type
-                                    ('http
-                                     'mcp-http-process-connection)
-                                    ('stdio
-                                     'mcp-stdio-process-connection))
-                                 :connection-type ,connection-type
-                                 :name ,name
-                                 :process ,process
-                                 :events-buffer-config (:size ,mcp-log-size)
-                                 :request-dispatcher ,(lambda (_ method params)
-                                                        (funcall #'mcp-request-dispatcher name method params))
-                                 :notification-dispatcher ,(lambda (connection method params)
-                                                             (funcall #'mcp-notification-dispatcher connection name method params))
-                                 :on-shutdown ,(lambda (_)
-                                                 (funcall #'mcp-on-shutdown name))
-                                 :initial-callback ,initial-callback
-                                 :prompts-callback ,prompts-callback
-                                 :tools-callback ,tools-callback
-                                 :resources-callback ,resources-callback
-                                 :resources-templates-callback ,resources-templates-callback
-                                 :error-callback ,error-callback
-                                 ,@(when (equal connection-type 'http)
-                                     (list :host (plist-get server-config :host)
-                                           :port (plist-get server-config :port)
-                                           :tls (plist-get server-config :tls)
-                                           :path (plist-get server-config :path)
-                                           :token (plist-get server-config :token)
-                                           :headers (plist-get server-config :headers)))))))
+         (let ((connection (apply #'make-instance
+                                `(,(pcase connection-type
+                                     ('http
+                                      'mcp-http-process-connection)
+                                     ('stdio
+                                      'mcp-stdio-process-connection))
+                                  :connection-type ,connection-type
+                                  :name ,name
+                                  :process ,process
+                                  :roots ,roots
+                                  :events-buffer-config (:size ,mcp-log-size)
+                                  :request-dispatcher ,(lambda (_ method params)
+                                                         (funcall #'mcp-request-dispatcher name method params))
+                                  :notification-dispatcher ,(lambda (connection method params)
+                                                              (funcall #'mcp-notification-dispatcher connection name method params))
+                                  :on-shutdown ,(lambda (_)
+                                                  (funcall #'mcp-on-shutdown name))
+                                  :initial-callback ,initial-callback
+                                  :prompts-callback ,prompts-callback
+                                  :tools-callback ,tools-callback
+                                  :resources-callback ,resources-callback
+                                  :resources-templates-callback ,resources-templates-callback
+                                  :error-callback ,error-callback
+                                  ,@(when (equal connection-type 'http)
+                                      (list :host (plist-get server-config :host)
+                                            :port (plist-get server-config :port)
+                                            :tls (plist-get server-config :tls)
+                                            :path (plist-get server-config :path)
+                                            :token (plist-get server-config :token)
+                                            :headers (plist-get server-config :headers)))))))
         ;; Initialize connection
         (puthash name connection mcp-server-connections)
         ;; Send the Initialize message
@@ -1333,6 +1361,72 @@ ERROR-CALLBACK is a function to call on error."
 CALLBACK is a function to call with the result.
 ERROR-CALLBACK is a function to call on error."
   (mcp--list-items connection :resources/templates/list :templateResources '-template-resources callback error-callback 'sync))
+
+(defun mcp-set-roots (name roots)
+  "Set the roots for MCP server NAME to ROOTS.
+
+NAME is the server name (string).
+ROOTS is a list of directory paths or root specifications.
+Each root can be either:
+- A string path (e.g., \"/home/user/project\")
+- A plist with :uri and :name
+  (e.g., (:uri \"file:///home/user/project\" :name \"Project\"))
+
+After setting roots, sends a notification to the server that roots
+have changed."
+  (when-let* ((connection (gethash name mcp-server-connections)))
+    (condition-case err
+        (progn
+          (setf (mcp--roots connection) roots)
+          (mcp-notify connection :notifications/roots/list_changed))
+      (error
+       (message "Warning: Could not set roots for %s: %s. Server may need to be restarted." name err)))))
+
+(defun mcp-add-root (name root)
+  "Add a ROOT to MCP server NAME.
+
+NAME is the server name (string).
+ROOT can be either:
+- A string path (e.g., \"/home/user/project\")
+- A plist with :uri and :name
+  (e.g., (:uri \"file:///home/user/project\" :name \"Project\"))
+
+After adding the root, sends a notification to the server that roots
+have changed."
+  (when-let* ((connection (gethash name mcp-server-connections)))
+    (condition-case err
+        (let ((current-roots (mcp--roots connection)))
+          (unless (member root current-roots)
+            (setf (mcp--roots connection) (append current-roots (list root)))
+            (mcp-notify connection :notifications/roots/list_changed)))
+      (error
+       (message "Warning: Could not add root to %s: %s. Server may need to be restarted." name err)))))
+
+(defun mcp-remove-root (name root)
+  "Remove ROOT from MCP server NAME.
+
+NAME is the server name (string).
+ROOT is the root to remove (string path or plist).
+
+After removing the root, sends a notification to the server that roots
+have changed."
+  (when-let* ((connection (gethash name mcp-server-connections)))
+    (condition-case err
+        (progn
+          (setf (mcp--roots connection)
+                (cl-remove root (mcp--roots connection) :test #'equal))
+          (mcp-notify connection :notifications/roots/list_changed))
+      (error
+       (message "Warning: Could not remove root from %s: %s. Server may need to be restarted." name err)))))
+
+(defun mcp-get-roots (name)
+  "Get the current roots for MCP server NAME.
+
+Returns a list of roots (strings or plists)."
+  (when-let* ((connection (gethash name mcp-server-connections)))
+    (condition-case nil
+        (mcp--roots connection)
+      (error nil))))
 
 (provide 'mcp)
 ;;; mcp.el ends here
