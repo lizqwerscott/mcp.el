@@ -33,7 +33,8 @@ Each server configuration is a list of the form
 - NAME is a string identifying the server.
 - COMMAND is the command to start the server.
 - ARGS is a list of arguments passed to the command.
-- URL is a string arguments to connect sse mcp server."
+- URL is a string arguments to connect sse mcp server.
+- ROOTS is a list of directory paths to expose to the server."
   :group 'mcp-hub
   :type '(list (cons string (list symbol string))))
 
@@ -187,7 +188,8 @@ Returns a list of server statuses, where each status is a plist containing:
 - :tools - Available tools (if connected)
 - :resources - Available resources (if connected)
 - :template-resources - Available template resources (if connected)
-- :prompts - Available prompts (if connected)"
+- :prompts - Available prompts (if connected)
+- :roots - Available roots (if connected)"
   (mapcar (lambda (server)
             (let ((name (car server)))
               (if-let* ((connection (gethash name mcp-server-connections)))
@@ -197,7 +199,8 @@ Returns a list of server statuses, where each status is a plist containing:
                         :tools (mcp--tools connection)
                         :resources (mcp--resources connection)
                         :template-resources (mcp--template-resources connection)
-                        :prompts (mcp--prompts connection))
+                        :prompts (mcp--prompts connection)
+                        :roots (mcp--roots connection))
                 (list :name name :status 'stop))))
           mcp-hub-servers))
 
@@ -327,8 +330,73 @@ currently highlighted in the *Mcp-Hub* buffer."
   (keymap-set mcp-hub-mode-map "S" #'mcp-hub-start-all-server)
   (keymap-set mcp-hub-mode-map "R" #'mcp-hub-restart-all-server)
   (keymap-set mcp-hub-mode-map "K" #'mcp-hub-close-all-server)
+  (keymap-set mcp-hub-mode-map "+" #'mcp-hub-add-root)
+  (keymap-set mcp-hub-mode-map "-" #'mcp-hub-remove-root)
+  (keymap-set mcp-hub-mode-map "=" #'mcp-hub-view-roots)
 
   (mcp-hub-update))
+
+;;;###autoload
+(defun mcp-hub-add-root ()
+  "Add a root directory to the currently selected MCP server.
+Prompts for a directory path and adds it to the server's roots."
+  (interactive)
+  (when-let* ((server (tabulated-list-get-entry))
+              (name (elt server 0))
+              (dir (read-directory-name "Root directory: ")))
+    (mcp-add-root name (expand-file-name dir))
+    (message "Added root %s to server %s" dir name)
+    (mcp-hub-update)))
+
+;;;###autoload
+(defun mcp-hub-remove-root ()
+  "Remove a root directory from the currently selected MCP server.
+Prompts for selection from the server's current roots."
+  (interactive)
+  (when-let* ((server (tabulated-list-get-entry))
+              (name (elt server 0))
+              (roots (mcp-get-roots name)))
+    (if (null roots)
+        (message "Server %s has no roots" name)
+      (let* ((root-strings (mapcar (lambda (root)
+                                     (if (stringp root)
+                                         root
+                                       (or (plist-get root :uri)
+                                           (format "%S" root))))
+                                   roots))
+             (selected (completing-read "Remove root: " root-strings nil t))
+             (root-to-remove (cl-find selected roots
+                                      :test (lambda (str root)
+                                              (equal str (if (stringp root)
+                                                             root
+                                                           (plist-get root :uri)))))))
+        (when root-to-remove
+          (mcp-remove-root name root-to-remove)
+          (message "Removed root %s from server %s" selected name)
+          (mcp-hub-update))))))
+
+;;;###autoload
+(defun mcp-hub-view-roots ()
+  "View the roots for the currently selected MCP server."
+  (interactive)
+  (when-let* ((server (tabulated-list-get-entry))
+              (name (elt server 0))
+              (roots (mcp-get-roots name)))
+    (if (null roots)
+        (message "Server %s has no roots" name)
+      (with-current-buffer (get-buffer-create (format "*%s roots*" name))
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (format "Roots for server: %s\n\n" name))
+          (dolist (root roots)
+            (if (stringp root)
+                (insert (format "  - %s\n" root))
+              (insert (format "  - %s (%s)\n"
+                              (plist-get root :uri)
+                              (plist-get root :name)))))
+          (goto-char (point-min))
+          (special-mode))
+        (pop-to-buffer (current-buffer))))))
 
 (provide 'mcp-hub)
 ;;; mcp-hub.el ends here

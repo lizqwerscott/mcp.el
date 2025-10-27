@@ -21,7 +21,9 @@ Need Emacs 30 or higher version
     :ensure t
     :after gptel
     :custom (mcp-hub-servers
-             `(("filesystem" . (:command "npx" :args ("-y" "@modelcontextprotocol/server-filesystem" "/home/lizqwer/MyProject/")))
+             `(("filesystem" . (:command "npx" 
+                                :args ("-y" "@modelcontextprotocol/server-filesystem")
+                                :roots ("/home/lizqwer/MyProject/")))
                ("fetch" . (:command "uvx" :args ("mcp-server-fetch")))
                ("qdrant" . (:url "http://localhost:8000/sse"))
                ("graphlit" . (
@@ -39,7 +41,9 @@ Need Emacs 30 or higher version
 *** Configuring MCP Servers
 #+begin_src elisp
   (setq mcp-hub-servers
-        '(("filesystem" . (:command "npx" :args ("-y" "@modelcontextprotocol/server-filesystem" "/home/lizqwer/MyProject/")))
+        '(("filesystem" . (:command "npx" 
+                           :args ("-y" "@modelcontextprotocol/server-filesystem")
+                           :roots ("/home/lizqwer/MyProject/")))
           ("fetch" . (:command "uvx" :args ("mcp-server-fetch")))
           ("qdrant" . (:url "http://localhost:8000/sse"))
           ("graphlit" . (
@@ -70,13 +74,19 @@ Use =mcp-hub= to launch the server management interface, which will automaticall
 | S   | mcp-hub-start-all-server   | Start all configured servers           |
 | R   | mcp-hub-restart-all-server | Restart all configured servers         |
 | K   | mcp-hub-close-all-server   | Stop all running servers               |
+| +   | mcp-hub-add-root           | Add root directory to server           |
+| -   | mcp-hub-remove-root        | Remove root directory from server      |
+| =   | mcp-hub-view-roots         | View server's root directories         |
 *** use with [[https://github.com/karthink/gptel][gptel]]
 - For =gptel= integration, See the [[https://github.com/karthink/gptel?tab=readme-ov-file#model-context-protocol-mcp-integration][gptel mcp]] for details.
 - [[https://github.com/lizqwerscott/gptel-mcp.el][gptel-mcp.el]] is interface integration for gptel.el and mcp.el
 ** Example [[https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem][filesystem]] server.
 *** Establish the connection first.
 #+begin_src elisp
-  (mcp-connect-server "filesystem" :command "npx" :args '("-y" "@modelcontextprotocol/server-filesystem" "~/Downloads/")
+  (mcp-connect-server "filesystem" 
+                      :command "npx" 
+                      :args '("-y" "@modelcontextprotocol/server-filesystem")
+                      :roots '("~/Downloads/" "~/Documents/")
                       :initial-callback
                       #'(lambda (connection)
                           (message "%s connection" (jsonrpc-name connection)))
@@ -89,6 +99,40 @@ Use =mcp-hub= to launch the server management interface, which will automaticall
                       :resources-callback
                       #'(lambda (connection resources)
                           (message "%s resources: %s" (jsonrpc-name connection) resources)))
+#+end_src
+*** Using Roots with Filesystem Server
+The filesystem server uses the MCP roots protocol to determine which directories it can access. Instead of passing directories as command-line arguments, you can specify them using the =:roots= parameter:
+
+#+begin_src elisp
+  (mcp-connect-server "filesystem" 
+                      :command "npx" 
+                      :args '("-y" "@modelcontextprotocol/server-filesystem")
+                      :roots '("/home/user/project1" "/home/user/project2"))
+#+end_src
+
+You can also dynamically manage roots after the server is connected:
+
+#+begin_src elisp
+  ;; Add a new root directory
+  (mcp-add-root "filesystem" "/home/user/new-project")
+
+  ;; Remove a root directory
+  (mcp-remove-root "filesystem" "/home/user/old-project")
+
+  ;; Replace all roots
+  (mcp-set-roots "filesystem" '("/home/user/project1" "/home/user/project2"))
+
+  ;; View current roots
+  (mcp-get-roots "filesystem")
+#+end_src
+
+Roots can also be specified as plists with additional metadata:
+#+begin_src elisp
+  (mcp-connect-server "filesystem"
+                      :command "npx"
+                      :args '("-y" "@modelcontextprotocol/server-filesystem")
+                      :roots '((:uri "file:///home/user/project" :name "My Project")
+                               "/home/user/downloads"))
 #+end_src
 *** Define the use of tools.
 The current text is being tested using the [[https://github.com/karthink/gptel/issues/514][gptel tool]] branch.Use =mcp-make-text-tool= to create standard tool call data ([[https://github.com/ahyatt/llm/discussions/124][Discussions]]).It is recommended to create tools within the tools-callback or wait for the mcp connect server to complete.
