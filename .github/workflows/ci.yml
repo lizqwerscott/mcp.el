@@ -42,6 +42,8 @@ jobs:
           version: ${{ matrix.emacs-version }}
 
       - name: test-mcp
+        shell: bash
         run: emacs -Q --batch --eval "(setq byte-compile-error-on-warn t)" -f batch-byte-compile mcp.el
       - name: test-mcp-hub
-        run: emacs -Q --batch --eval '(progn (setq byte-compile-error-on-warn t) (add-to-list '"'"'load-path "./"))' -f batch-byte-compile mcp-hub.el
+        shell: bash
+        run: emacs -Q --batch --eval "(progn (setq byte-compile-error-on-warn t) (add-to-list 'load-path \"./\"))" -f batch-byte-compile mcp-hub.el
