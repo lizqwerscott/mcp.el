@@ -321,26 +321,28 @@ The message is sent differently based on connection type:
                                               (not (jsonrpc--process connection)))
                                      (mcp--connect-sse connection))
                                    (unless (mcp--sse connection)
-                                     (let (data json)
-                                       (pcase (car (split-string (plist-get headers-plist :content-type) ";" t))
-                                         ("text/event-stream"
-                                          (dolist (line (split-string body "\n"))
-                                            (cond
-                                             ((string-prefix-p "data: " line)
-                                              (setq data (string-trim (substring line 5)))))))
-                                         ("application/json"
-                                          (setq data body)))
-                                       (condition-case-unless-debug err
-                                           (when (stringp data)
-                                             (setq json (json-parse-string data
-                                                                           :object-type 'plist
-                                                                           :null-object nil
-                                                                           :false-object :json-false)))
-                                         (json-parse-error
-                                          ;; parse error and not because of incomplete json
-                                          (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
-                                       (when json
-                                         (jsonrpc-connection-receive connection json))))))
+                                     (when-let* ((content-type (plist-get headers-plist :content-type))
+                                                 ((not (string= "" (string-trim body)))))
+                                       (let (data json)
+                                         (pcase (car (split-string content-type  ";" t))
+                                           ("text/event-stream"
+                                            (dolist (line (split-string body "\n"))
+                                              (cond
+                                               ((string-prefix-p "data: " line)
+                                                (setq data (string-trim (substring line 5)))))))
+                                           ("application/json"
+                                            (setq data body)))
+                                         (condition-case-unless-debug err
+                                             (when (stringp data)
+                                               (setq json (json-parse-string data
+                                                                             :object-type 'plist
+                                                                             :null-object nil
+                                                                             :false-object :json-false)))
+                                           (json-parse-error
+                                            ;; parse error and not because of incomplete json
+                                            (jsonrpc--warn "Invalid JSON: %s\t %s" (cdr err) data)))
+                                         (when json
+                                           (jsonrpc-connection-receive connection json)))))))
                                (kill-buffer))))
            (set (make-local-variable 'url-mime-accept-string) url-mime-accept-string))))
       ('stdio
@@ -406,7 +408,8 @@ The message is sent differently based on connection type:
                  (if (string-prefix-p "HTTP" data-block)
                      (if-let* ((headers (mcp--parse-http-header data-block))
                                (response-code (plist-get headers :response-code))
-                               (content-type (or (car (split-string (plist-get headers :content-type) ";" t)) "")))
+                               (content-type (plist-get headers :content-type))
+                               (content-type (or (car (split-string content-type ";" t)) "")))
                          (when (or (not (string= response-code "200"))
                                    (not (string-match "text/event-stream" content-type)))
                            ;; sse not connect success
