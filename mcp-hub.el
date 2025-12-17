@@ -36,7 +36,16 @@ Each server configuration is a list of the form
 - URL is a string arguments to connect sse mcp server.
 - ROOTS is a list of directory paths to expose to the server."
   :group 'mcp-hub
-  :type '(list (cons string (list symbol string))))
+  :type
+  '(alist
+    :key-type string
+    :value-type
+    (plist
+     :options
+     ((:command string)
+      (:args (repeat string))
+      (:url string)
+      (:roots (repeat directory))))))
 
 (defun mcp-hub--start-server (server &optional inited-callback syncp)
   "Start an MCP server with the given configuration.
