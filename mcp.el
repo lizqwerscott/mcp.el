@@ -136,7 +136,13 @@ Available levels:
    (-roots
     :initarg :roots
     :initform nil
-    :accessor mcp--roots))
+    :accessor mcp--roots)
+   (-timeout
+    :initarg :timeout
+    :initform nil
+    :accessor mcp--timeout
+    :documentation "Timeout in seconds for jsonrpc async requests.
+When nil, uses `jsonrpc-default-request-timeout'."))
   :documentation "A MCP connection over an Emacs process.")
 
 (defclass mcp-http-process-connection (mcp-process-connection)
@@ -750,6 +756,7 @@ SYNCP specifies if the operation should be synchronous or asynchronous."
 
 ;;;###autoload
 (cl-defun mcp-connect-server (name &key command args url env token headers roots
+                                   timeout
                                    initial-callback tools-callback prompts-callback
                                    resources-callback resources-templates-callback
                                    error-callback syncp)
@@ -774,6 +781,9 @@ Each root can be either:
 - A plist with :uri and :name
   (e.g., (:uri \"file:///home/user/project\" :name \"Project\"))
 Roots define filesystem boundaries that the server can access.
+
+TIMEOUT is the timeout in seconds for jsonrpc async requests.
+Defaults to `jsonrpc-default-request-timeout' when nil.
 
 INITIAL-CALLBACK is a function called when the server completes
 the connection.
@@ -838,6 +848,7 @@ in the `mcp-server-connections` hash table for future reference."
                                   :name ,name
                                   :process ,process
                                   :roots ,roots
+                                  :timeout ,(or timeout jsonrpc-default-request-timeout)
                                   :events-buffer-config (:size ,mcp-log-size)
                                   :request-dispatcher ,(lambda (_ method params)
                                                          (funcall #'mcp-request-dispatcher name method params))
@@ -1028,6 +1039,7 @@ See `mcp-async-set-log-level' and `mcp-sync-set-log-level'."
          (args `(,connection
                  :logging/setLevel
                  ,(list :level (format "%s" log-level))
+                 :timeout ,(mcp--timeout connection)
                  ,@(unless syncp `(:success-fn
                                    ,success-fn))
                  ,@(unless syncp `(:error-fn
@@ -1090,6 +1102,7 @@ On error, it displays an error message with the code from the server."
   (jsonrpc-async-request connection
                          :ping
                          nil
+                         :timeout (mcp--timeout connection)
                          :success-fn
                          (lambda (res)
                            (message "[mcp] ping success: %s" res))
@@ -1202,6 +1215,7 @@ SYNCP specifies if the operation should be synchronous or asynchronous."
                                 (jsonrpc-name connection) code message))))
          (args `(,connection
                  ,method nil
+                 :timeout ,(mcp--timeout connection)
                  ,@(unless syncp `(:success-fn
                                    ,success-fn))
                  ,@(unless syncp `(:error-fn
@@ -1258,6 +1272,7 @@ ERROR-CALLBACK is a function to call on error."
                                :arguments (if arguments
                                               arguments
                                             #s(hash-table)))
+                         :timeout (mcp--timeout connection)
                          :success-fn
                          (lambda (res)
                            (funcall callback res))
@@ -1304,6 +1319,7 @@ ERROR-CALLBACK is a function to call on error."
                                :arguments (if arguments
                                               arguments
                                             #s(hash-table)))
+                         :timeout (mcp--timeout connection)
                          :success-fn
                          (lambda (res)
                            (funcall callback res))
@@ -1346,6 +1362,7 @@ succeeds, or ERROR-CALLBACK if it fails."
   (jsonrpc-async-request connection
                          :resources/read
                          (list :uri uri)
+                         :timeout (mcp--timeout connection)
                          :success-fn
                          (lambda (res)
                            (funcall callback res))

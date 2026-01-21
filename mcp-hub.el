@@ -34,7 +34,9 @@ Each server configuration is a list of the form
 - COMMAND is the command to start the server.
 - ARGS is a list of arguments passed to the command.
 - URL is a string arguments to connect sse mcp server.
-- ROOTS is a list of directory paths to expose to the server."
+- ROOTS is a list of directory paths to expose to the server.
+- TIMEOUT is the timeout in seconds for jsonrpc async requests.
+  Defaults to `jsonrpc-default-request-timeout'."
   :group 'mcp-hub
   :type
   '(alist
@@ -45,7 +47,8 @@ Each server configuration is a list of the form
      ((:command string)
       (:args (repeat string))
       (:url string)
-      (:roots (repeat directory))))))
+      (:roots (repeat directory))
+      (:timeout integer)))))
 
 (defun mcp-hub--start-server (server &optional inited-callback syncp)
   "Start an MCP server with the given configuration.
