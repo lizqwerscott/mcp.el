@@ -484,8 +484,9 @@ Prompts for selection from the server's current roots."
                           (insert (propertize (format "  • %s" (or name uri-template)) 'face 'font-lock-type-face))
                           (when uri-template
                             (insert (format " (%s)" (propertize uri-template 'face 'font-lock-string-face))))
+                          (insert "\n")
                           (when description
-                            (insert (format " - %s" (propertize description 'face 'font-lock-comment-face))))
+                            (insert (format "      %s" (propertize description 'face 'font-lock-comment-face))))
                           (insert "\n")))
             (insert "\n"))
 
@@ -497,8 +498,9 @@ Prompts for selection from the server's current roots."
                      do (let ((name (plist-get prompt :name))
                               (description (plist-get prompt :description)))
                           (insert (propertize (format "  • %s" name) 'face 'font-lock-keyword-face))
+                          (insert "\n")
                           (when description
-                            (insert (format " - %s" (propertize description 'face 'font-lock-comment-face))))
+                            (insert (format "      %s" (propertize description 'face 'font-lock-comment-face))))
                           (insert "\n")))
             (insert "\n"))
 
