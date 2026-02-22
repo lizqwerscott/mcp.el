@@ -1374,13 +1374,13 @@ succeeds, or ERROR-CALLBACK if it fails."
   "Get list of resource templates from the MCP server using the CONNECTION.
 CALLBACK is a function to call with the result.
 ERROR-CALLBACK is a function to call on error."
-  (mcp--list-items connection :resources/templates/list :templateResources '-template-resources callback error-callback nil))
+  (mcp--list-items connection :resources/templates/list :resourceTemplates '-template-resources callback error-callback nil))
 
 (defun mcp-sync-list-resource-templates (connection &optional callback error-callback)
   "Get list of resource templates from the MCP server using the CONNECTION.
 CALLBACK is a function to call with the result.
 ERROR-CALLBACK is a function to call on error."
-  (mcp--list-items connection :resources/templates/list :templateResources '-template-resources callback error-callback 'sync))
+  (mcp--list-items connection :resources/templates/list :resourceTemplates '-template-resources callback error-callback 'sync))
 
 (defun mcp-set-roots (name roots)
   "Set the roots for MCP server NAME to ROOTS.
