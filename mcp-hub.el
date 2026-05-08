@@ -457,6 +457,7 @@ Prompts for selection from the server's current roots."
 
   (define-key mcp-hub-detail-mode-map (kbd "n") #'mcp-hub-detail-next-heading)
   (define-key mcp-hub-detail-mode-map (kbd "p") #'mcp-hub-detail-previous-heading)
+  (define-key mcp-hub-detail-mode-map (kbd "RET") #'mcp-hub-detail-reading-resource)
 
   (define-key mcp-hub-detail-mode-map (kbd "g") #'mcp-hub-detail-refresh))
 
@@ -594,6 +595,69 @@ Prompts for selection from the server's current roots."
     (if pos
         (goto-char pos)
       (message "No previous headings"))))
+
+;;;###autoload
+(defun mcp-hub-detail-reading-resource ()
+  "Read resource file from the detail buffer.
+
+Get the resource URI at point, look up the connection from the buffer's
+server name, then fetch and display the resource content."
+  (interactive)
+  (let* ((uri (get-text-property (point) 'resource-uri))
+         (name (get-text-property (point-min) 'mcp-server-name))
+         (connection (and name (gethash name mcp-server-connections))))
+    (unless uri
+      (user-error "No resource URI at point"))
+    (unless connection
+      (user-error "Server %s is not connected" name))
+    (message "Reading resource: %s..." uri)
+    (condition-case err
+        (let ((result (mcp-read-resource connection uri)))
+          (mcp-hub-detail--display-resource result uri)
+          (message "Reading resource: %s...done" uri))
+      (error
+       (message "Failed to read resource %s: %s" uri (error-message-string err))))))
+
+(defun mcp-hub-detail--display-resource (result uri)
+  "Display RESULT from reading URI in a dedicated buffer.
+
+Per the MCP spec (resources/read), RESULT contains :contents, which is an
+array of content objects. Each content object has:
+  - :uri  — the URI of the resource
+  - :mimeType — optional MIME type (e.g. \"text/plain\")
+  - :text  — text content (for text resources)
+  - :blob  — base64-encoded string (for binary resources)"
+  (let* ((buf (get-buffer-create (format "*Mcp Resource: %s*" uri)))
+         (contents (plist-get result :contents))
+         (parts (if (vectorp contents)
+                    contents
+                  (vector contents)))
+         (text (mapconcat
+                (lambda (item)
+                  (let ((mime (plist-get item :mimeType))
+                        (text-content (plist-get item :text))
+                        (blob (plist-get item :blob))
+                        (item-uri (plist-get item :uri)))
+                    (cond
+                     (text-content
+                      (if (and mime (not (string-prefix-p "text/" mime)))
+                          (format "[MIME: %s]\n%s" mime text-content)
+                        text-content))
+                     (blob
+                      (format "[Binary: %s, base64 %d bytes]"
+                              (or mime "application/octet-stream")
+                              (length blob)))
+                     (t (prin1-to-string item)))))
+                parts "\n---\n")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert text))
+      (goto-char (point-min))
+      (setq-local header-line-format (format "Resource: %s" uri))
+      ;; Detect major mode from MIME type or URI extension
+      (special-mode))
+    (display-buffer buf)))
 
 (provide 'mcp-hub)
 ;;; mcp-hub.el ends here
