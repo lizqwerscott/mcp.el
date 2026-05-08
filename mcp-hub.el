@@ -636,8 +636,7 @@ array of content objects. Each content object has:
                 (lambda (item)
                   (let ((mime (plist-get item :mimeType))
                         (text-content (plist-get item :text))
-                        (blob (plist-get item :blob))
-                        (item-uri (plist-get item :uri)))
+                        (blob (plist-get item :blob)))
                     (cond
                      (text-content
                       (if (and mime (not (string-prefix-p "text/" mime)))
