@@ -426,10 +426,34 @@ Prompts for selection from the server's current roots."
 
 (require 'outline)
 
+(defun mcp-hub-detail-imenu-index-function ()
+  "Mcp detail mode imenu index function."
+  (let ((alist '()) (sub '()) section)
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (pcase (get-text-property (point) 'face)
+          ('outline-1
+           (when sub
+             (push (cons (car (car alist)) (nreverse sub)) alist)
+             (setq sub nil))
+           (setq section (buffer-substring-no-properties (point) (line-end-position)))
+           (push (cons section (point)) alist))
+          ('outline-2
+           (push (cons (buffer-substring-no-properties (point) (line-end-position))
+                       (point)) sub)))
+        (forward-line 1))
+      (when sub
+        (setq alist (nconc (nreverse (cdr alist))
+                           (list (cons (caar alist) (nreverse sub))))))
+      (nreverse alist))))
+
 (define-derived-mode mcp-hub-detail-mode special-mode "MCP Hub Detail"
   "Major mode for displaying MCP server information with outline support."
 
   (setq-local buffer-read-only t)
+
+  (setq-local imenu-create-index-function #'mcp-hub-detail-imenu-index-function)
 
   (define-key mcp-hub-detail-mode-map (kbd "n") #'mcp-hub-detail-next-heading)
   (define-key mcp-hub-detail-mode-map (kbd "p") #'mcp-hub-detail-previous-heading)
@@ -483,9 +507,9 @@ Prompts for selection from the server's current roots."
                do (let ((uri (plist-get resource :uri))
                         (name (plist-get resource :name))
                         (description (plist-get resource :description)))
-                    (insert (propertize (format "  • %s" name) 'face 'outline-2))
+                    (insert (propertize (format "  • %s" name) 'face 'outline-2 'resource-uri uri))
                     (when uri
-                      (insert (format " (%s)" (propertize uri 'face 'font-lock-string-face))))
+                      (insert (format " (%s)" (propertize uri 'face 'font-lock-string-face 'resource-uri uri))))
                     (insert "\n")
                     (when description
                       (insert (format "    %s\n" description)))))
@@ -515,6 +539,7 @@ Prompts for selection from the server's current roots."
                for prompt = (if (vectorp prompts) (aref prompts i) (nth i prompts))
                do (let ((name (plist-get prompt :name))
                         (description (plist-get prompt :description)))
+                    (message "Prompts: %s" prompt)
                     (insert (propertize (format "  • %s" name) 'face 'outline-2))
                     (insert "\n")
                     (when description
