@@ -3,11 +3,12 @@
 (require 'cl-lib)
 (require 'mcp-oauth)
 (require 'mcp)
+(require 'mcp-hub)
 
 (defmacro mcp-oauth-test-with-provider (&rest body)
   `(let* ((directory (make-temp-file "mcp-oauth-test-" t))
           (provider (mcp-oauth-create "https://mcp.example.test/v1?tenant=a"
-                                      (list :storage-directory directory :open-browser nil))))
+                                      (list :storage-directory directory :open-browser nil :grant-type 'device-code))))
      (unwind-protect (progn ,@body) (delete-directory directory t))))
 
 (ert-deftest mcp-oauth-test-clear-credentials-has-interactive-provider-input ()
@@ -23,12 +24,235 @@
        (should (eq cancelled provider))
        (should (eq deleted provider))))))
 
+(ert-deftest mcp-oauth-test-valid-token-does-not-rediscover ()
+  (mcp-oauth-test-with-provider
+   (let ((discoveries 0) success)
+     (setf (mcp-oauth-provider-metadata provider) '(:token_endpoint "https://issuer.test/token")
+           (mcp-oauth-provider-state provider) '(:access_token "token" :expires_at 9999999999))
+     (cl-letf (((symbol-function 'mcp-oauth-discover)
+                (lambda (_) (setq discoveries (1+ discoveries)))))
+       (mcp-oauth-ensure-token provider (lambda (token) (setq success token)) #'ignore)
+       (should (equal success "token"))
+       (should (= discoveries 0))))))
+
+(ert-deftest mcp-oauth-test-normalizes-numeric-fields-and-scopes ()
+  (mcp-oauth-test-with-provider
+   (should (= 3600 (mcp-oauth--positive-number "3600" "expires_in")))
+   (should (equal "tools:read" (mcp-oauth--scope
+                                  (mcp-oauth-create "https://mcp.example.test/v1"
+                                                    '(:scopes "tools:read" :grant-type device-code)))))
+   (should-error (mcp-oauth--positive-number "many" "interval"))))
+
+(ert-deftest mcp-oauth-test-existing-directory-is-not-chmodded ()
+  (let ((directory (make-temp-file "mcp-oauth-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'mcp-oauth--directory-safe-p) (lambda (_) t))
+                  ((symbol-function 'set-file-modes) (lambda (&rest _) (error "must not chmod"))))
+          (mcp-oauth--ensure-directory directory))
+      (delete-directory directory t))))
+
+(ert-deftest mcp-oauth-test-constant-time-string-checks-every-byte ()
+  (should (mcp-oauth--constant-time-string= "state" "state"))
+  (should-not (mcp-oauth--constant-time-string= "state" "xtate"))
+  (should-not (mcp-oauth--constant-time-string= "state" "statx")))
+
+(ert-deftest mcp-oauth-test-loopback-request-rejects-duplicate-and-invalid-input ()
+  (should (equal "code" (mcp-oauth--loopback-request
+                          "GET /callback?code=code&state=state HTTP/1.1\r\nhOsT: localhost:49152\r\n\r\n"
+                          49152 "/callback" "state")))
+  (dolist (request '("GET /callback?code=code&code=other&state=state HTTP/1.1\r\nHost: localhost:49152\r\n\r\n"
+                     "GET /callback?code=code&state=state&state=other HTTP/1.1\r\nHost: localhost:49152\r\n\r\n"
+                     "GET /callback?code=code&state=state HTTP/1.0\r\nHost: localhost:49152\r\n\r\n"
+                     "GET /callback?code=code&state=wrong HTTP/1.1\r\nHost: localhost:49152\r\n\r\n"))
+    (should-error (mcp-oauth--loopback-request request 49152 "/callback" "state"))))
+
+(ert-deftest mcp-oauth-test-pkce-loopback-exchanges-only-validated-code ()
+  (mcp-oauth-test-with-provider
+   (let (filter browser token-fields result failure)
+     (setf (mcp-oauth-provider-metadata provider)
+           '(:authorization_endpoint "https://issuer.test/authorize"
+             :code_challenge_methods_supported ["S256"])
+           (mcp-oauth-provider-client provider) '(:client_id "client"))
+     (setf (mcp-oauth-provider-config provider)
+           '(:redirect-uri "http://localhost:49152/oauth/callback" :open-browser t))
+     (cl-letf (((symbol-function 'mcp-oauth--random-bytes)
+                (lambda (count) (make-string count ?x)))
+               ((symbol-function 'make-network-process)
+                (lambda (&rest args)
+                  (funcall (plist-get args :log) 'listener 'client "accept")
+                  'listener))
+               ((symbol-function 'set-process-filter) (lambda (_ value) (setq filter value)))
+               ((symbol-function 'process-get) (lambda (&rest _) nil))
+               ((symbol-function 'process-put) (lambda (&rest _) nil))
+               ((symbol-function 'process-live-p) (lambda (_) nil))
+               ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+               ((symbol-function 'run-at-time) (lambda (&rest _) nil))
+               ((symbol-function 'mcp-oauth--open-browser)
+                (lambda (_ url) (setq browser url)))
+               ((symbol-function 'mcp-oauth--token-request)
+                (lambda (_ fields _) (setq token-fields fields) '(:access_token "token"))))
+       (mcp-oauth-authorize provider (lambda (state) (setq result state)) (lambda (message) (setq failure message)))
+       (let ((state (cadr (assoc "state" (url-parse-query-string (cadr (split-string browser "?")) t)))))
+         (funcall filter 'client (format "GET /oauth/callback?code=code&state=%s HTTP/1.1\r\nHost: localhost:49152\r\n\r\n" state)))
+       (should-not failure)
+       (should (equal (cdr (assoc-string "code" token-fields)) "code"))
+       (should (equal (plist-get result :access_token) "token"))))))
+
+(ert-deftest mcp-oauth-test-pkce-loopback-accepts-fragmented-local-request ()
+  (mcp-oauth-test-with-provider
+   (let (browser result failure port client)
+     (setf (mcp-oauth-provider-metadata provider)
+           '(:authorization_endpoint "https://issuer.test/authorize"
+             :code_challenge_methods_supported ["S256"])
+           (mcp-oauth-provider-client provider) '(:client_id "client"))
+     (cl-letf (((symbol-function 'mcp-oauth--random-bytes) (lambda (count) (make-string count ?x)))
+               ((symbol-function 'mcp-oauth--open-browser) (lambda (_ url) (setq browser url)))
+               ((symbol-function 'mcp-oauth--token-request) (lambda (&rest _) '(:access_token "token"))))
+       (setq port (+ 30000 (random 20000)))
+       (setf (mcp-oauth-provider-config provider)
+             (list :redirect-uri (format "http://localhost:%d/callback" port) :open-browser t
+                   :static-client '(:client_id "client" :token_endpoint_auth_method "none")))
+       (mcp-oauth-authorize provider (lambda (state) (setq result state))
+                            (lambda (message) (setq failure message)))
+       (accept-process-output nil 0.05)
+       (should-not failure)
+       (should (process-live-p (mcp-oauth-provider-authorization-process provider)))
+       (setq client (open-network-stream "mcp-oauth-test-client" nil "127.0.0.1" port :type 'plain))
+       (let ((state (cadr (assoc "state" (url-parse-query-string (cadr (split-string browser "?")) t)))))
+         (process-send-string client (format "GET /callback?code=code&sta"))
+         (accept-process-output nil 0.05)
+         (process-send-string client (format "te=%s HTTP/1.1\r\nHost: localhost:%d\r\n\r\n" state port)))
+       (dotimes (_ 20)
+         (unless (or result failure)
+           (accept-process-output (mcp-oauth-provider-authorization-process provider) 0.05)
+           (accept-process-output nil 0.05)))
+       (when (process-live-p client) (delete-process client))
+       (should-not failure)
+       (should (equal (plist-get result :access_token) "token"))))))
+
+(ert-deftest mcp-oauth-test-pkce-loopback-rejects-state-mismatch ()
+  (mcp-oauth-test-with-provider
+   (let (filter exchanged failure)
+     (setf (mcp-oauth-provider-metadata provider)
+           '(:authorization_endpoint "https://issuer.test/authorize"
+             :code_challenge_methods_supported ["S256"])
+           (mcp-oauth-provider-client provider) '(:client_id "client")
+           (mcp-oauth-provider-config provider) '(:redirect-uri "http://localhost:49153/callback" :open-browser t))
+     (cl-letf (((symbol-function 'mcp-oauth--random-bytes) (lambda (count) (make-string count ?x)))
+               ((symbol-function 'make-network-process)
+                (lambda (&rest args)
+                  (funcall (plist-get args :log) 'listener 'client "accept")
+                  'listener))
+               ((symbol-function 'set-process-filter) (lambda (_ value) (setq filter value)))
+               ((symbol-function 'process-get) (lambda (&rest _) nil))
+               ((symbol-function 'process-put) (lambda (&rest _) nil))
+               ((symbol-function 'process-live-p) (lambda (_) nil))
+               ((symbol-function 'run-at-time) (lambda (&rest _) nil))
+               ((symbol-function 'mcp-oauth--open-browser) (lambda (&rest _) nil))
+               ((symbol-function 'mcp-oauth--token-request) (lambda (&rest _) (setq exchanged t))))
+       (mcp-oauth-authorize provider #'ignore (lambda (message) (setq failure message)))
+       (funcall filter 'client "GET /callback?code=code&state=wrong HTTP/1.1\r\nHost: localhost:49153\r\n\r\n")
+       (should-not exchanged)
+       (should failure)))))
+
+(ert-deftest mcp-oauth-test-stopped-server-clear-selection-skips-stdio ()
+  (mcp-oauth-test-with-provider
+   (let ((mcp-server-connections (make-hash-table :test #'equal))
+         (pipe (make-pipe-process :name "mcp-stdio-test" :noquery t))
+         (mcp-hub-servers
+          (list (cons "stopped" (list :url "https://mcp.example.test/v1?tenant=a"
+                                      :oauth (mcp-oauth-provider-config provider))))))
+     (unwind-protect
+         (progn
+           (puthash "stdio" (make-instance 'mcp-stdio-process-connection :name "stdio" :process pipe)
+                    mcp-server-connections)
+           (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "stopped")))
+             (let ((selected (mcp-oauth--read-provider)))
+               (should (equal (mcp-oauth--state-file selected) (mcp-oauth--state-file provider)))
+               (should (= 1 (hash-table-count mcp-server-connections))))))
+       (when (process-live-p pipe) (delete-process pipe))))))
+
+(ert-deftest mcp-oauth-test-sync-connection-rejected-before-process-creation ()
+  (let ((mcp-server-connections (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'make-network-process)
+               (lambda (&rest _) (ert-fail "Connection creation must not occur"))))
+      (should (equal "Synchronous MCP OAuth connections are unsupported"
+                     (condition-case err
+                         (mcp-connect-server "sync-oauth" :url "https://mcp.example.test/mcp"
+                                             :oauth '(:grant-type device-code) :syncp t)
+                       (error (error-message-string err)))))
+      (should (= 0 (hash-table-count mcp-server-connections))))))
+
+(ert-deftest mcp-oauth-test-loopback-idle-client-has-short-deadline ()
+  (mcp-oauth-test-with-provider
+   (let ((schedule (symbol-function 'run-at-time)) client failure)
+     (setf (mcp-oauth-provider-metadata provider)
+           '(:authorization_endpoint "https://issuer.test/authorize"
+             :code_challenge_methods_supported ["S256"])
+           (mcp-oauth-provider-client provider) '(:client_id "client")
+           (mcp-oauth-provider-config provider)
+           (list :redirect-uri (format "http://localhost:%d/callback" (+ 30000 (random 20000)))))
+     (unwind-protect
+         (cl-letf (((symbol-function 'run-at-time)
+                    (lambda (time repeat function &rest args)
+                      (apply schedule (if (equal time 5) 0.05 time) repeat function args))))
+           (mcp-oauth-authorize provider #'ignore (lambda (message) (setq failure message)))
+           (should-not failure)
+           (setq client (open-network-stream
+                         "mcp-oauth-idle-test" nil "127.0.0.1"
+                         (url-port (url-generic-parse-url (mcp-oauth--redirect-uri provider))) :type 'plain))
+           (dotimes (_ 5) (accept-process-output nil 0.05))
+           (should-not (mcp-oauth-provider-authorization-clients provider))
+           (should (process-live-p (mcp-oauth-provider-authorization-process provider)))
+           (should (mcp-oauth-provider-waiters provider)))
+       (when (and client (process-live-p client)) (delete-process client))
+       (mcp-oauth-cancel-authorization provider)))))
+
+(ert-deftest mcp-oauth-test-late-loopback-callback-never-exchanges ()
+  (mcp-oauth-test-with-provider
+   (let ((exchanges 0))
+     (cl-letf (((symbol-function 'mcp-oauth--token-request)
+                (lambda (&rest _) (cl-incf exchanges))))
+       (mcp-oauth--loopback-filter provider 49152 "/callback" "state" "verifier"
+                                  "http://localhost:49152/callback" 0 nil
+                                  "GET /callback?code=c&state=state HTTP/1.1\r\nHost: localhost:49152\r\n\r\n")
+       (setf (mcp-oauth-provider-waiters provider) (list (cons #'ignore #'ignore))
+             (mcp-oauth-provider-authorization-generation provider) 1)
+       (mcp-oauth--loopback-filter provider 49152 "/callback" "state" "verifier"
+                                  "http://localhost:49152/callback" 0 nil "late")
+       (should (= exchanges 0))))))
+
+(ert-deftest mcp-oauth-test-401-reset-retains-refresh-until-issuer-verification ()
+  (mcp-oauth-test-with-provider
+   (setf (mcp-oauth-provider-state provider)
+         '(:issuer "https://issuer.test" :refresh_token "refresh")
+         (mcp-oauth-provider-metadata provider) '(:issuer "https://issuer.test")
+         (mcp-oauth-provider-client provider) '(:client_id "client"))
+   (mcp-oauth-reset-discovery provider)
+   (should (equal "refresh" (plist-get (mcp-oauth-provider-state provider) :refresh_token)))
+   (should-not (mcp-oauth-provider-metadata provider))
+   (should-not (mcp-oauth-provider-client provider))))
+
+(ert-deftest mcp-oauth-test-windows-random-bytes-rejects-malformed-output ()
+  (cl-letf (((symbol-function 'mcp-oauth--windows-random-command)
+             (lambda (_) "invalid")))
+    (should-error (mcp-oauth--windows-random-bytes 32))))
+
 (ert-deftest mcp-oauth-test-resource-keeps-query-and-rejects-fragment ()
   (should (equal (mcp-oauth-provider-resource (mcp-oauth-create "https://mcp.example.test/v1?tenant=a"))
                  "https://mcp.example.test/v1?tenant=a"))
   (should-not (equal (mcp-oauth--state-file (mcp-oauth-create "https://mcp.example.test/v1?a"))
                      (mcp-oauth--state-file (mcp-oauth-create "https://mcp.example.test/v1?b"))))
   (should-error (mcp-oauth-create "https://mcp.example.test/v1#fragment")))
+
+(ert-deftest mcp-oauth-test-discovery-requires-exact-issuer ()
+  (mcp-oauth-test-with-provider
+   (cl-letf (((symbol-function 'mcp-oauth--protected-resource-metadata)
+              (lambda (_) '(:resource "https://mcp.example.test/v1?tenant=a"
+                            :authorization_servers ["https://issuer.test"])))
+             ((symbol-function 'mcp-oauth--request-json)
+              (lambda (&rest _) '(:token_endpoint "https://issuer.test/token"))))
+     (should-error (mcp-oauth-discover provider)))))
 
 (ert-deftest mcp-oauth-test-rfc8414-root-and-path-issuer-urls ()
   (let ((provider (mcp-oauth-create "https://mcp.example.test/v1")))
@@ -176,7 +400,8 @@
   (mcp-oauth-test-with-provider
    (let ((calls 0) (failures 0) timer)
      (setf (mcp-oauth-provider-metadata provider) '(:device_authorization_endpoint "https://issuer.test/device")
-           (mcp-oauth-provider-client provider) '(:client_id "client"))
+           (mcp-oauth-provider-client provider) '(:client_id "client")
+           (mcp-oauth-provider-config provider) '(:grant-type device-code))
      (cl-letf (((symbol-function 'mcp-oauth--request-json)
                 (lambda (&rest _) (setq calls (1+ calls))
                   '(:device_code "hidden" :verification_uri "https://issuer.test/v" :user_code "u" :expires_in 60)))

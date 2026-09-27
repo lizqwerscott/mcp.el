@@ -52,8 +52,8 @@
 (declare-function mcp-oauth-cancel-authorization "mcp-oauth" (provider))
 (declare-function mcp-oauth-provider-p "mcp-oauth")
 
-(defconst mcp--support-versions (list "2025-03-26" "2024-11-05")
-  "MCP support version.")
+(defconst mcp--support-versions (list "2025-06-18" "2025-03-26" "2024-11-05")
+  "MCP protocol versions supported by this client.")
 
 (defcustom mcp-server-start-time 60
   "The Seconds of mcp server start time."
@@ -187,6 +187,12 @@ When nil, uses `jsonrpc-default-request-timeout'."))
    (-session-id
     :initform nil
     :accessor mcp--session-id)
+   (-protocol-version
+    :initform nil
+    :accessor mcp--protocol-version)
+   (-session-reinitializing
+    :initform nil
+    :accessor mcp--session-reinitializing)
    (-running
     :initform t
     :accessor mcp--running))
@@ -712,6 +718,9 @@ SYNCP specifies if the operation should be synchronous or asynchronous."
                               (message "[mcp] Connected! Server `MCP (%s)' now managing." (jsonrpc-name connection))
                               (setf (mcp--capabilities connection) capabilities
                                     (mcp--server-info connection) serverInfo)
+                              (when (object-of-class-p connection 'mcp-http-process-connection)
+                                (setf (mcp--protocol-version connection) protocolVersion
+                                      (mcp--session-reinitializing connection) nil))
                               ;; Notify server initialized
                               (mcp-notify connection
                                           :notifications/initialized)
@@ -821,6 +830,8 @@ This function creates a new process for the server, initializes a connection,
 and sends an initialization message to the server.  The connection is stored
 in the `mcp-server-connections` hash table for future reference."
   (unless (mcp--server-running-p name)
+    (when (and syncp oauth)
+      (error "Synchronous MCP OAuth connections are unsupported"))
     (when url (require 'mcp-http))
     (when oauth (require 'mcp-oauth))
     (when-let* ((server-config (cond (command
@@ -925,8 +936,6 @@ in the `mcp-server-connections` hash table for future reference."
                      (setf (mcp--status connection) 'error)
                      (when error-callback (funcall error-callback -1 message))))
                 (run-with-idle-timer 1 nil msg-fn))
-            (when oauth
-              (error "Synchronous MCP OAuth connections are unsupported"))
             (sit-for 1)
             (funcall msg-fn)))))))
 

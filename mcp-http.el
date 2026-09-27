@@ -66,12 +66,19 @@ Notifications have no response channel and are only logged."
 (defun mcp-http--post (connection json id retried)
   "POST JSON request ID for CONNECTION, retrying one OAuth 401 only."
   (when (jsonrpc-running-p connection)
-    (let ((url-request-method "POST")
+    (let* ((request-session (mcp--session-id connection))
+           (initialize-request
+            (condition-case nil
+                (equal "initialize" (plist-get (json-parse-string json :object-type 'plist) :method))
+              (error nil)))
+          (url-request-method "POST")
           (url-request-extra-headers
            (append '(("Content-Type" . "application/json")
                      ("Accept" . "application/json, text/event-stream"))
-                   (when-let* ((session (mcp--session-id connection)))
-                     `(("Mcp-Session-Id" . ,session)))
+                   (when-let* ((version (mcp--protocol-version connection)))
+                     `(("MCP-Protocol-Version" . ,version)))
+                   (when request-session
+                     `(("Mcp-Session-Id" . ,request-session)))
                    (when-let* ((token (or (and (mcp--oauth connection)
                                                 (mcp-oauth-token (mcp--oauth connection)))
                                            (mcp--resolve-value (mcp--token connection)))))
@@ -95,15 +102,30 @@ Notifications have no response channel and are only logged."
                                               header-end (point-max)))
                                      (parsed (mcp--parse-http-header headers))
                                      (code (string-to-number (or (plist-get parsed :response-code) "0"))))
-                                (when-let* ((session (plist-get parsed :mcp-session-id)))
-                                  (setf (mcp--session-id connection) session))
+                                ;; Session IDs are received only with a successful
+                                ;; initialization response and contain visible ASCII.
+                                (when (and (<= 200 code 299) initialize-request)
+                                  (when-let* ((session (plist-get parsed :mcp-session-id)))
+                                    (when (string-match-p "\\`[!-~]+\\'" session)
+                                      (setf (mcp--session-id connection) session))))
                                 (cond
                                  ((and (= code 401) (mcp--oauth connection) (not retried))
                                   (mcp-oauth-invalidate-access-token (mcp--oauth connection))
+                                  (when (mcp-oauth-provider-p (mcp--oauth connection))
+                                    (mcp-oauth-reset-discovery (mcp--oauth connection)))
                                   (mcp-oauth-ensure-token
                                    (mcp--oauth connection)
                                    (lambda (_token) (mcp-http--post connection json id t))
                                    (lambda (_message) (mcp-http--http-error connection id "authorization" ""))))
+                                 ((and (= code 404) request-session
+                                       (equal request-session (mcp--session-id connection)))
+                                  ;; A request cannot safely be replayed after session expiry.
+                                  ;; Ignore stale delayed failures for an older session.
+                                  (setf (mcp--session-id connection) nil)
+                                  (mcp-http--http-error connection id "session expired" "")
+                                  (unless (mcp--session-reinitializing connection)
+                                    (setf (mcp--session-reinitializing connection) t)
+                                    (mcp--send-initial-message connection)))
                                  ((<= 200 code 299)
                                   (mcp-http--body-json connection (plist-get parsed :content-type) body))
                                  (t (mcp-http--http-error connection id code body)))))))
