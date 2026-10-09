@@ -59,6 +59,37 @@ You can use =mcp-hub-start-all-server= to start all MCP servers, such as launchi
   (add-hook 'after-init-hook
             #'mcp-hub-start-all-server)
 #+end_src
+*** Parallel web search and fetch
+[[https://docs.parallel.ai/integrations/mcp/search-mcp][Parallel Search MCP]] provides =web_search= and =web_fetch= without an API key, with lower anonymous rate limits. This example uses [[https://github.com/geelen/mcp-remote][mcp-remote]] to bridge Streamable HTTP to mcp.el's stdio transport.
+
+Install Node.js 22 or newer and make sure =npx= is available to Emacs. =npx -y= downloads and runs the pinned bridge package on first use. The =--enable-proxy= flag honors =HTTP_PROXY=, =HTTPS_PROXY= and =NO_PROXY= when set. After installing mcp.el as above, evaluate this configuration to add the server without replacing your other entries:
+#+begin_src elisp
+  (require 'mcp-hub)
+  (setf (alist-get "parallel" mcp-hub-servers nil nil #'equal)
+        '(:command "npx"
+          :args ("-y" "mcp-remote@0.14.3"
+                 "https://search.parallel.ai/mcp"
+                 "--transport" "http-only"
+                 "--enable-proxy"
+                 "--header" "User-Agent:mcp.el/0.1.0")))
+  (mcp-hub-start-all-server nil '("parallel") t)
+#+end_src
+
+Once connected, call the tools through the normal MCP interface. =web_search= returns URLs and relevant excerpts; =web_fetch= reads specific pages. Reuse a conversation identifier for related calls:
+#+begin_src elisp
+  (let* ((connection (gethash "parallel" mcp-server-connections))
+         (session-id (md5 (format "%s:%s:%s" (current-time) (emacs-pid) (random)))))
+    (mcp-call-tool connection "web_search"
+                   `(:objective "Find the GNU Emacs manual"
+                     :search_queries ["GNU Emacs manual"]
+                     :session_id ,session-id))
+    (mcp-call-tool connection "web_fetch"
+                   `(:urls ["https://www.gnu.org/software/emacs/manual/html_node/emacs/index.html"]
+                     :objective "Find the Emacs manual introduction"
+                     :session_id ,session-id)))
+#+end_src
+
+Use =(mcp-stop-server "parallel")= to disconnect.
 *** Managing MCP Servers
 Use =mcp-hub= to launch the server management interface, which will automatically start all configured MCP servers.
 
