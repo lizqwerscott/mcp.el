@@ -3,7 +3,7 @@
 ;; Copyright (C) 2025  lizqwer scott
 
 ;; Author: lizqwer scott <lizqwerscott@gmail.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "30.1") (jsonrpc "1.0.25"))
 ;; Keywords: tools
 ;; URL: https://github.com/lizqwerscott/mcp.el
@@ -47,8 +47,13 @@
 (require 'cl-lib)
 (require 'url)
 
-(defconst mcp--support-versions (list "2025-03-26" "2024-11-05")
-  "MCP support version.")
+(declare-function mcp-oauth-create "mcp-oauth")
+(declare-function mcp-oauth-ensure-token "mcp-oauth")
+(declare-function mcp-oauth-cancel-authorization "mcp-oauth" (provider))
+(declare-function mcp-oauth-provider-p "mcp-oauth")
+
+(defconst mcp--support-versions (list "2025-06-18" "2025-03-26" "2024-11-05")
+  "MCP protocol versions supported by this client.")
 
 (defcustom mcp-server-start-time 60
   "The Seconds of mcp server start time."
@@ -161,6 +166,14 @@ When nil, uses `jsonrpc-default-request-timeout'."))
    (-token
     :initarg :token
     :accessor mcp--token)
+   (-oauth
+    :initarg :oauth
+    :initform nil
+    :accessor mcp--oauth)
+   (-transport
+    :initarg :transport
+    :initform 'auto
+    :accessor mcp--transport)
    (-headers
     :initarg :headers
     :initform nil
@@ -174,6 +187,12 @@ When nil, uses `jsonrpc-default-request-timeout'."))
    (-session-id
     :initform nil
     :accessor mcp--session-id)
+   (-protocol-version
+    :initform nil
+    :accessor mcp--protocol-version)
+   (-session-reinitializing
+    :initform nil
+    :accessor mcp--session-reinitializing)
    (-running
     :initform t
     :accessor mcp--running))
@@ -699,6 +718,9 @@ SYNCP specifies if the operation should be synchronous or asynchronous."
                               (message "[mcp] Connected! Server `MCP (%s)' now managing." (jsonrpc-name connection))
                               (setf (mcp--capabilities connection) capabilities
                                     (mcp--server-info connection) serverInfo)
+                              (when (object-of-class-p connection 'mcp-http-process-connection)
+                                (setf (mcp--protocol-version connection) protocolVersion
+                                      (mcp--session-reinitializing connection) nil))
                               ;; Notify server initialized
                               (mcp-notify connection
                                           :notifications/initialized)
@@ -755,7 +777,7 @@ SYNCP specifies if the operation should be synchronous or asynchronous."
     (not (member (mcp--status conn) '(stop error)))))
 
 ;;;###autoload
-(cl-defun mcp-connect-server (name &key command args url env token headers roots
+(cl-defun mcp-connect-server (name &key command args url env token oauth transport headers roots
                                    timeout
                                    initial-callback tools-callback prompts-callback
                                    resources-callback resources-templates-callback
@@ -771,6 +793,12 @@ ENV is a plist argument to set mcp server env.
 
 TOKEN is a string.
 Authentication token used when connecting to an HTTP MCP server.
+
+OAUTH is an `mcp-oauth-provider' for an HTTP MCP server.  OAuth authorization
+is asynchronous; do not use it with SYNCP.
+
+TRANSPORT is `auto' (legacy SSE without OAuth), `sse', or `streamable'.
+OAuth always selects Streamable HTTP.
 
 HEADERS is a alist.
 Additional HTTP headers to include when connecting via URL.
@@ -802,6 +830,10 @@ This function creates a new process for the server, initializes a connection,
 and sends an initialization message to the server.  The connection is stored
 in the `mcp-server-connections` hash table for future reference."
   (unless (mcp--server-running-p name)
+    (when (and syncp oauth)
+      (error "Synchronous MCP OAuth connections are unsupported"))
+    (when url (require 'mcp-http))
+    (when oauth (require 'mcp-oauth))
     (when-let* ((server-config (cond (command
                                       (list :connection-type 'stdio
                                             :command command
@@ -810,6 +842,13 @@ in the `mcp-server-connections` hash table for future reference."
                                       (when-let* ((res (mcp--parse-http-url url)))
                                         (plist-put res :connection-type 'http)
                                         (plist-put res :token token)
+                                        (plist-put res :oauth
+                                                   (and oauth
+                                                        (if (mcp-oauth-provider-p oauth)
+                                                            oauth
+                                                          (mcp-oauth-create url oauth))))
+                                        (plist-put res :transport
+                                                   (if oauth 'streamable (or transport 'auto)))
                                         (plist-put res :headers headers)))))
                 (connection-type (plist-get server-config :connection-type))
                 (buffer-name (format "*Mcp %s server*" name))
@@ -868,6 +907,8 @@ in the `mcp-server-connections` hash table for future reference."
                                             :tls (plist-get server-config :tls)
                                             :path (plist-get server-config :path)
                                             :token (plist-get server-config :token)
+                                            :oauth (plist-get server-config :oauth)
+                                            :transport (plist-get server-config :transport)
                                             :headers (plist-get server-config :headers)))))))
         ;; Initialize connection
         (puthash name connection mcp-server-connections)
@@ -886,7 +927,15 @@ in the `mcp-server-connections` hash table for future reference."
                               (funcall error-callback -1 (format "%s" (cdr err))))
                             (message "Sadly, %s mcp server process start error" name))))))
           (if (not syncp)
-              (run-with-idle-timer 1 nil msg-fn)
+              (if (and (equal connection-type 'http) oauth)
+                  (mcp-oauth-ensure-token
+                   (mcp--oauth connection)
+                   (lambda (_token) (run-with-idle-timer 1 nil msg-fn))
+                   (lambda (message)
+                     (mcp-stop-server (jsonrpc-name connection))
+                     (setf (mcp--status connection) 'error)
+                     (when error-callback (funcall error-callback -1 message))))
+                (run-with-idle-timer 1 nil msg-fn))
             (sit-for 1)
             (funcall msg-fn)))))))
 
@@ -899,8 +948,12 @@ a message will be displayed indicating that the server is not running."
   (if-let* ((connection (gethash name mcp-server-connections)))
       (progn
         (ignore-errors
+          (when-let* ((oauth (and (object-of-class-p connection 'mcp-http-process-connection)
+                                  (mcp--oauth connection))))
+            (mcp-oauth-cancel-authorization oauth))
           (jsonrpc-shutdown connection))
-        (setf (mcp--status connection) 'stop))
+        (setf (mcp--status connection) 'stop)
+        (remhash name mcp-server-connections))
     (message "mcp %s server not started" name)))
 
 (defun mcp--parse-tool-args (properties required)

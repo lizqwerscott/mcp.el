@@ -217,6 +217,65 @@ Since the [[https://github.com/modelcontextprotocol/servers/tree/main/src/filesy
                                        #'(lambda (connection templates)
                                            (message "%s" templates))))
 #+end_src
+* OAuth for remote Streamable HTTP servers
+
+=mcp.el= 0.2 adds native OAuth 2.1 authorization-code support for remote
+Streamable HTTP MCP servers.  It discovers protected-resource and authorization
+server metadata, registers a public client when required, uses S256 PKCE with a
+localhost loopback redirect, sends RFC 8707 resource indicators, refreshes
+tokens before they expire, and retries an unauthorized POST once after
+authorization.
+
+#+begin_src elisp
+  (mcp-connect-server
+   "remote"
+   :url "https://mcp.example.com/mcp"
+   :oauth '(:client-name "Emacs MCP"
+            :scopes ("tools:read")
+            :redirect-uri "http://localhost:49152/mcp/oauth/callback"
+            :open-browser t))
+#+end_src
+
+=:oauth= accepts an =mcp-oauth-provider= or a configuration plist.  Supported
+keys are =:client-name=, =:scopes=, =:metadata-url=,
+=:authorization-server=, =:static-client=, =:storage-directory=,
+=:open-browser=, =:allow-http=, =:redirect-uri= and =:grant-type=.  The
+registered =:redirect-uri= must be an exact =http://localhost:PORT/PATH= URL;
+it is used for the default authorization-code S256 PKCE flow.  HTTPS is
+required for MCP and discovered OAuth endpoints unless the explicit
+development-only =:allow-http= option is
+non-nil.  The client validates resource and issuer before reusing state.  It
+first tries the RFC 9728 path-derived metadata URL; when that fails, it makes
+one unauthenticated MCP initialize probe and follows only a 401 Bearer
+=resource_metadata= challenge.  Set =:metadata-url= to explicitly override
+this discovery (the override is always used directly).
+
+=:transport= selects the URL transport: =auto= keeps the existing legacy SSE
+behavior for unauthenticated URLs, =sse= explicitly requests that behavior,
+and =streamable= selects Streamable HTTP.  OAuth always selects Streamable
+HTTP.  OAuth requests never follow redirects, so a 3xx response cannot carry
+tokens, device codes, or client data across an origin boundary.
+
+OAuth state is stored atomically under =~/.emacs.d/mcp-oauth/= by default;
+its directory is mode 0700 and its state files are mode 0600.  State contains
+client registration and refresh credentials.  It is never written to Custom,
+process arguments, messages, or the event log.  On =invalid_grant=, stale state
+is removed and the next request begins authorization again.
+
+The first authorization opens its PKCE authorization URL when =:open-browser=
+is non-nil and waits for the registered loopback callback.  This implementation
+supports public clients only: static and dynamically registered clients must use
+=token_endpoint_auth_method= =none= (or omit it).  RFC 8628 device authorization
+is retained only as an explicit non-standard extension: set =:grant-type= to
+=device-code=, and configure a server registration which supports that grant.
+Discovery and token exchanges are synchronous only on the cold/expired-token
+path; valid tokens use cached metadata and do not block on discovery.  On
+POSIX, PKCE randomness comes from =/dev/urandom=; native Windows uses the
+built-in PowerShell/.NET cryptographic RNG and fails closed if unavailable.
+Existing users of =mcp-remote= can remove its stdio bridge and configure the
+remote URL plus =:oauth= directly once their server supports standard metadata
+and authorization-code endpoints.
+
 * Roadmap
 - [X] HTTP SSE based MCP server connections
 - [ ] mcp marketplace (browser and auto install mcp server)
