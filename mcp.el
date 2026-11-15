@@ -898,10 +898,21 @@ from `mcp-server-connections'. If no server with the given NAME is found,
 a message will be displayed indicating that the server is not running."
   (if-let* ((connection (gethash name mcp-server-connections)))
       (progn
+        (mcp--kill-process connection)
         (ignore-errors
           (jsonrpc-shutdown connection))
         (setf (mcp--status connection) 'stop))
     (message "mcp %s server not started" name)))
+
+(defun mcp--kill-process (connection)
+  "Kill the process of CONNECTION if it is still running.
+Since Emacs 30, `jsonrpc-shutdown' no longer kills the process itself: it
+waits for the process to exit, and warns that its sentinel has not run when
+the process is still alive.  An MCP server does not exit by itself, so kill
+it first."
+  (let ((process (jsonrpc--process connection)))
+    (when (and (processp process) (process-live-p process))
+      (delete-process process))))
 
 (defun mcp--parse-tool-args (properties required)
   "Parse tool arguments from PROPERTIES and REQUIRED lists.
